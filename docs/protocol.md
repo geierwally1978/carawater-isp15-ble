@@ -102,12 +102,13 @@ Observed properties:
 Frame length:     150 bytes
 Transport:        BLE notification
 Characteristic:  FF01
+Interval:         approximately 2 seconds
 ```
 
 Example frame:
 
 ```text
-AA93201400008900000012018C00000000003D000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000A003601040100000000000000000000000000000000000030
+AA93201400008900000010018C00000000003D000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000A00360104010000000000000000000000000000000000002E
 ```
 
 Multiple consecutive 150-byte frames were received successfully without writing any data to FF02.
@@ -172,10 +173,12 @@ AA 93
 Example:
 
 ```text
-AA 93 20 14 00 00 89 00 00 00 12 01 8C 00 00 00 00 00 3D ...
+AA 93 20 14 00 00 89 00 00 00 10 01 8C 00 00 00 00 00 3D ...
 ```
 
 Several fields can already be correlated with values shown by the official app.
+
+The final byte at offset 149 is an additive 8-bit checksum.
 
 ---
 
@@ -196,8 +199,8 @@ Offsets are zero-based.
 | 12 | `8C` | Water temperature, probably value / 10 | Strong evidence |
 | 13–17 | varies / zero | Unknown | Unknown |
 | 18 | `3D` | Total water volume, at least for observed values | Strong evidence |
-| remaining | varies | Unknown | Unknown |
-| final byte | varies | Possible checksum / CRC / status field | Suspected |
+| 19–148 | varies / mostly zero | Unknown / additional telemetry and configuration | Unknown |
+| 149 | `2D` / `2E` / `2F` etc. | Additive 8-bit checksum | Confirmed |
 
 This table will be updated as more controlled captures become available.
 
@@ -556,6 +559,8 @@ Subscribe to FF01 notifications
    ↓
 Receive 150-byte telemetry frames
    ↓
+Verify checksum
+   ↓
 Decode status values
 ```
 
@@ -568,10 +573,9 @@ No FF02 write is required for this process.
 The following frames were captured consecutively using Python/Bleak:
 
 ```text
-AA93201400008800000013018C00000000003D...
-AA93201400008900000012018C00000000003D...
-AA93201400008900000012018C00000000003D...
-AA93201400008900000012018C00000000003D...
+AA93201400008900000010018C00000000003D...
+AA9320140000890000000F018C00000000003D...
+AA9320140000890000000F018C00000000003D...
 ```
 
 The frames remained largely stable while the pump was stopped.
@@ -581,14 +585,75 @@ Only a small number of fields changed.
 For example:
 
 ```text
-Offset 6:
-88 → 89
-
 Offset 10:
-13 → 12
+0x10 → 0x0F
+
+Checksum:
+0x2E → 0x2D
 ```
 
-This is useful for distinguishing slowly changing telemetry from fixed protocol fields.
+This relationship contributed to identifying the checksum algorithm.
+
+---
+
+# Checksum
+
+The final byte of a normal 150-byte FF01 frame is an **additive 8-bit checksum**.
+
+The checksum is calculated by adding bytes `0` through `148` and keeping only the lowest 8 bits of the result.
+
+In Python:
+
+```python
+checksum = sum(frame[:149]) & 0xFF
+```
+
+The calculated value must equal:
+
+```python
+frame[149]
+```
+
+Example:
+
+```text
+Received checksum:   0x2E
+Calculated checksum: 0x2E
+```
+
+This relationship was verified against multiple consecutive live FF01 frames.
+
+A particularly useful observation was:
+
+```text
+Offset 10: 0x10 → 0x0F   (-1)
+Checksum:  0x2E → 0x2D   (-1)
+```
+
+Another capture changed two fields simultaneously:
+
+```text
+Offset 6:  0x89 → 0x88   (-1)
+Offset 10: 0x10 → 0x11   (+1)
+```
+
+The changes cancel each other out and the checksum remained unchanged:
+
+```text
+0x2E → 0x2E
+```
+
+Further live verification using the Python reader produced valid checksums for every tested frame.
+
+Current validation code:
+
+```python
+received_checksum = frame[149]
+calculated_checksum = sum(frame[:149]) & 0xFF
+checksum_ok = received_checksum == calculated_checksum
+```
+
+**Status: confirmed for the observed 150-byte FF01 frame type.**
 
 ---
 
@@ -617,51 +682,6 @@ Likely candidates still to decode include:
 - real-time flow
 
 Controlled tests with the pump running will be required to identify these fields reliably.
-
----
-
-# Final byte
-
-The final byte of FF01 changes when packet contents change.
-
-Observed examples include:
-
-```text
-03
-02
-01
-13
-E8
-0A
-41
-73
-94
-6E
-36
-58
-76
-30
-```
-
-During the latest stable notification test, multiple packets ended in:
-
-```text
-30
-```
-
-while some fields inside the packet changed slightly.
-
-Therefore the final byte should **not yet be assumed to be a simple checksum**.
-
-Possible explanations include:
-
-- checksum
-- CRC
-- status field
-- sequence/state information
-- another protocol-specific value
-
-Its meaning remains unknown.
 
 ---
 
@@ -698,6 +718,9 @@ The client:
 2. connects using CoreBluetooth
 3. subscribes to FF01 notifications
 4. receives 150-byte status frames
+5. validates the additive checksum
+6. decodes currently identified telemetry fields
+7. compares consecutive frames for changed offsets
 
 No write operation is required.
 
@@ -723,6 +746,8 @@ This provides the basis for a future read-only ISP15 client.
 - Pressure levels 1–3 produce reproducibly different offset-2 values under controlled stopped conditions.
 - Direct FF01 reads may return an empty value even while notifications provide telemetry.
 - Normal FF01 telemetry disappeared when the ISP15 was switched OFF in the tested scenario.
+- Byte 149 is an additive 8-bit checksum for the observed 150-byte FF01 frames.
+- The checksum is calculated as `sum(frame[0:149]) & 0xFF`.
 
 ## Strong evidence
 
@@ -735,7 +760,6 @@ This provides the basis for a future read-only ISP15 client.
 ## Suspected
 
 - FF02 carries commands from the official app.
-- The final FF01 byte may contain integrity or status information.
 
 ## Unknown
 
@@ -752,30 +776,31 @@ This provides the basis for a future read-only ISP15 client.
 - Level 2 command.
 - Level 3 command.
 - Reset command.
-- Final-byte algorithm/meaning.
 - Error-code representation.
 
 ---
 
 # Next steps
 
-1. Build a reusable read-only BLE client.
-2. Discover the ISP15 by device name rather than a fixed macOS identifier.
+1. Continue development of the reusable read-only BLE client.
+2. Discover the ISP15 by device name rather than a fixed platform-specific identifier.
 3. Subscribe automatically to FF01 notifications.
-4. Decode the strongly suspected fields:
+4. Validate every received FF01 frame using the checksum.
+5. Decode the strongly suspected fields:
    - voltage
    - temperature
    - total water volume
-5. Log raw 150-byte frames for further analysis.
-6. Perform controlled running tests to identify:
+6. Log raw 150-byte frames for further analysis.
+7. Perform controlled running tests to identify:
    - current
    - pressure
    - real-time flow
-7. Investigate the individual bits of offset 2.
-8. Capture FF02 writes from the official app.
-9. Determine the command protocol.
-10. Only after commands are understood, test controlled writes.
-11. Build a Home Assistant integration.
+8. Investigate the individual bits of offset 2.
+9. Investigate daily water volume and the total-volume counter format.
+10. Capture FF02 writes from the official app.
+11. Determine the command protocol.
+12. Only after commands are understood, test controlled writes.
+13. Build a Home Assistant integration.
 
 ---
 
