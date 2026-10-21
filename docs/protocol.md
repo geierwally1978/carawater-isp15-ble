@@ -6,13 +6,11 @@
 
 🚧 **Work in progress**
 
-This protocol is currently being reverse engineered.
+This protocol is currently being reverse engineered using controlled comparisons between values displayed by the official Carawater app and raw BLE data.
 
-The information in this document is based on BLE observations and comparisons with values displayed by the official Carawater app.
+The current focus is the `FF01` status characteristic.
 
-Unless explicitly marked as **confirmed**, protocol fields should be considered preliminary.
-
-No write commands have been tested against the pump yet.
+No unknown or guessed commands have been written to `FF02`.
 
 ---
 
@@ -25,10 +23,9 @@ Tested device:
 | Device | Carawater ISP15 |
 | BLE name | `ISP_42_539c` |
 | BLE type | Bluetooth Low Energy |
-| Pairing | Not required |
-| Bonding | Not required |
+| Pairing | Not required during current tests |
 
-The device exposes the standard Device Information Service and one custom BLE service.
+The BLE name may differ between individual ISP15 units.
 
 ---
 
@@ -64,7 +61,7 @@ Service UUID:
 
 Two custom characteristics were discovered.
 
-### FF01 – status/data
+### FF01 – status / telemetry
 
 UUID:
 
@@ -79,11 +76,13 @@ READ
 NOTIFY
 ```
 
-Current assumption:
+FF01 carries status and telemetry information from the ISP15.
 
-**FF01 carries status and measurement data from the ISP15 to the BLE client.**
+Normal observed status frames begin with:
 
-This is strongly supported by changing values observed while the pump was running.
+```text
+AA 93
+```
 
 ---
 
@@ -103,216 +102,373 @@ WRITE_NO_RESPONSE
 NOTIFY
 ```
 
-Current assumption:
+FF02 is the most likely characteristic used by the official app to control the ISP15.
 
-**FF02 is used by the app to send commands/configuration to the ISP15.**
+Expected commands include:
 
-This is not yet confirmed because write traffic from the official app has not yet been captured.
+- ON
+- OFF
+- Pressure Level 1
+- Pressure Level 2
+- Pressure Level 3
+- Reset
+
+The actual command format has **not yet been captured or confirmed**.
+
+No guessed commands should be sent to the device.
 
 ---
 
-# Status packets
+# FF01 status frame
 
-Reads from FF01 return a comparatively long binary packet.
-
-Observed packets start with:
+A typical FF01 frame starts with:
 
 ```text
 AA 93
 ```
 
-Example while the pump was stopped:
+Example:
 
 ```text
-AA93251400008A000000F800960000000000390000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000003601040100000000000000000000000000000000000000000000000003
+AA 93 25 14 00 00 88 00 00 00 14 01 8C 00 00 00 00 00 3D ...
 ```
 
-Another observed stopped-state packet:
-
-```text
-AA932514000088000000640196000000000039000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000360104010000000000000000000000000000000000000000000000006E
-```
+Several fields can already be correlated with values shown by the official app.
 
 ---
 
-# Known app values
+# Current field map
 
-The official Carawater app displays at least the following live information:
+Offsets are zero-based.
 
-- Supply voltage (V)
-- Current (A)
-- Water temperature (°C)
-- Water pressure (bar)
-- Real-time flow (L/min)
-- Daily water volume (L)
-- Total water volume (L)
-- Pump running/stopped
-- Error status
-- Constant-pressure mode
-  - Level 1
-  - Level 2
-  - Level 3
+| Offset | Example | Current interpretation | Confidence |
+|---:|---|---|---|
+| 0 | `AA` | Frame header | Confirmed |
+| 1 | `93` | Frame type/header | Confirmed in observed normal frames |
+| 2 | `25` / `45` / `65` / `20` | Status / mode flags | Confirmed dynamic, encoding unknown |
+| 3 | `14` | Unknown | Unknown |
+| 4–5 | `00 00` | Unknown | Unknown |
+| 6 | `88` | Supply voltage, probably value / 10 | Strong evidence |
+| 7–9 | varies | Unknown | Unknown |
+| 10–11 | varies | Unknown dynamic field | Unknown |
+| 12 | `8C` | Water temperature, probably value / 10 | Strong evidence |
+| 13–17 | varies / zero | Unknown | Unknown |
+| 18 | `3D` | Total water volume, at least for observed values | Strong evidence |
+| remaining | varies | Unknown | Unknown |
+| final byte | varies | Possible checksum / CRC | Suspected |
 
-The app also provides:
-
-- ON/OFF
-- Reset
-- Selection of constant-pressure level 1–3
-
-These functions are expected to correspond to commands sent through FF02.
+This table will be updated as more controlled captures become available.
 
 ---
 
-# Constant-pressure levels
+# Supply voltage
 
-The ISP15 provides three selectable constant-pressure modes.
-
-BLE status data was recorded for all three modes.
-
-## Level 1
-
-Observed FF01 packet:
+During controlled testing the official app displayed:
 
 ```text
-AA935514000086001700E9008C001C0000003B000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000A0036010401000000000000000000000000000000000000000000000055
+13.6 V
 ```
 
-Official app showed approximately:
+At the same time, FF01 contained at offset 6:
 
 ```text
-Voltage:     13.2 V
-Current:      2.8 A
-Temperature: 14.0 °C
-Pressure:     1.21 bar
-Flow:         4.8 L/min
-Mode:         Level 1
+88
 ```
+
+Hexadecimal `0x88` equals decimal `136`.
+
+This strongly suggests:
+
+```text
+voltage = byte[6] / 10
+```
+
+Example:
+
+```text
+0x88 = 136
+136 / 10 = 13.6 V
+```
+
+Another capture contained:
+
+```text
+0x87 = 135
+```
+
+which would represent:
+
+```text
+13.5 V
+```
+
+A small voltage change between disconnecting the official app and reading with BLE Scanner is plausible.
+
+**Status: strong evidence, not yet considered fully confirmed.**
 
 ---
 
-## Level 2
+# Water temperature
 
-Observed FF01 packet:
-
-```text
-AA93451400008A00000047018C00000000003B000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000A0036010401000000000000000000000000000000000000000000000075
-```
-
-The app confirmed:
+During all controlled tests the official app displayed:
 
 ```text
-Mode: Level 2
+14.0 °C
 ```
 
-During a later running measurement the app displayed approximately:
+FF01 consistently contained at offset 12:
 
 ```text
-Voltage:     13.2 V
-Current:      2.5 A
-Temperature: 14.0 °C
-Pressure:     2.00 bar
-Flow:         1.4 L/min
+8C
 ```
+
+Hexadecimal `0x8C` equals decimal `140`.
+
+This strongly suggests:
+
+```text
+water_temperature = byte[12] / 10
+```
+
+Example:
+
+```text
+0x8C = 140
+140 / 10 = 14.0 °C
+```
+
+**Status: strong evidence.**
+
+A future test at a different water temperature is required for final confirmation.
 
 ---
 
-## Level 3
+# Total water volume
 
-Observed FF01 packet:
-
-```text
-AA93651400008A00000047018C00000000003B000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000A0036010401000000000000000000000000000000000000000000000095
-```
-
-The app confirmed:
+During controlled testing the official app displayed:
 
 ```text
-Mode: Level 3
+Total flow: 61 L
 ```
 
-During a later running measurement the app displayed approximately:
+FF01 contained at offset 18:
 
 ```text
-Voltage:     13.2 V
-Current:      2.9 A
-Temperature: 14.0 °C
-Pressure:     1.79 bar
-Flow:         3.3 L/min
+3D
 ```
+
+Hexadecimal `0x3D` equals decimal `61`.
+
+This strongly suggests that this field contains the total water volume.
+
+Example:
+
+```text
+0x3D = 61
+```
+
+Earlier captures also showed this field changing as the total value displayed by the app increased.
+
+The size and possible multi-byte representation of this counter still need to be investigated, especially for values above 255 L.
+
+**Status: strong evidence.**
 
 ---
 
-# Interesting packet differences
+# Status / mode byte
 
-The packets recorded for the three constant-pressure modes contain a very interesting difference near the beginning.
+Offset 2 is one of the most interesting fields currently under investigation.
 
-Observed prefixes:
+Controlled tests were performed with:
 
-```text
-Level 1:
-AA 93 55 14 ...
+- no water tap opened
+- pump motor stopped
+- same temperature
+- same total water volume
+- nearly identical supply voltage
+- only the pressure level changed
 
-Level 2:
-AA 93 45 14 ...
+The following values were observed:
 
-Level 3:
-AA 93 65 14 ...
-```
-
-This suggests that byte(s) near this position may contain mode/status flags.
-
-Current observation:
-
-| Mode | Observed byte |
+| State | Offset 2 |
 |---|---:|
-| Level 1 | `0x55` |
-| Level 2 | `0x45` |
-| Level 3 | `0x65` |
+| Level 1, stopped | `0x25` |
+| Level 2, stopped | `0x45` |
+| Level 3, stopped | `0x65` |
 
-⚠️ **Not yet confirmed**
+This gives the pattern:
 
-The value may contain multiple bit flags rather than being a simple numeric representation of the selected pressure level.
+```text
+Level 1: 0x25
+Level 2: 0x45
+Level 3: 0x65
+```
 
-More controlled captures are required.
+The difference between pressure levels is:
+
+```text
++0x20
+```
+
+This is strong evidence that pressure-level information is encoded in this byte.
+
+However, offset 2 is **not simply the pressure-level number**.
 
 ---
 
-# Running vs stopped
+# Additional status flags
 
-A change between stopped and running operation can also be seen near the beginning of the packet.
+After switching the ISP15 OFF using the official app and then switching it ON again, the following state was observed:
 
-Examples:
+Official app:
 
-Stopped:
+```text
+Status:            Stopped
+Pressure level:    1
+Voltage:           13.6 V
+Current:           0.00 A
+Water temperature: 14.0 °C
+Water pressure:    1.91 bar
+Flow:              0.0 L/min
+Total flow:        61 L
+```
+
+Immediately afterwards FF01 started with:
+
+```text
+AA 93 20 14 ...
+```
+
+This is different from the previously observed stable Level 1 stopped state:
 
 ```text
 AA 93 25 14 ...
 ```
 
-Running examples:
+Therefore:
 
 ```text
-AA 93 35 14 ...
-AA 93 55 14 ...
+0x20
+0x25
 ```
 
-This suggests that byte 2 (zero-based) contains several status bits.
+can both occur while the official app reports Level 1.
 
-Possible information encoded here may include:
+This strongly suggests that offset 2 is a **bit field containing multiple status flags**, rather than a simple mode value.
 
-- pump running/stopped
-- selected constant-pressure mode
-- additional state flags
+Possible information encoded in this byte may include:
 
-This remains under investigation.
+- selected pressure level
+- initialization state
+- pump enabled state
+- pump running/stopped state
+- other controller status flags
+
+The individual bits have not yet been decoded.
 
 ---
 
-# Dynamic measurements
+# Controlled pressure-level captures
 
-A sequence recorded while water was flowing showed several fields changing rapidly.
+## Level 1 – stopped
 
-Example:
+App:
+
+```text
+Voltage:           13.6 V
+Current:           0.00 A
+Water temperature: 14.0 °C
+Water pressure:    1.90 bar
+Flow:              0.0 L/min
+Total flow:        61 L
+```
+
+FF01 prefix:
+
+```text
+AA 93 25 14 00 00 88 00 00 00 14 01 8C 00 00 00 00 00 3D
+```
+
+---
+
+## Level 2 – stopped
+
+App:
+
+```text
+Voltage:           13.6 V
+Current:           0.00 A
+Water temperature: 14.0 °C
+Water pressure:    1.91 bar
+Flow:              0.0 L/min
+Total flow:        61 L
+```
+
+FF01 prefix:
+
+```text
+AA 93 45 14 00 00 88 00 00 00 16 01 8C 00 00 00 00 00 3D
+```
+
+---
+
+## Level 3 – stopped
+
+App:
+
+```text
+Voltage:           13.6 V
+Current:           0.00 A
+Water temperature: 14.0 °C
+Water pressure:    1.90 bar
+Flow:              0.0 L/min
+Total flow:        61 L
+```
+
+FF01 prefix:
+
+```text
+AA 93 65 14 00 00 87 00 00 00 15 01 8C 00 00 00 00 00 3D
+```
+
+The complete raw captures are stored separately in the `captures/` directory.
+
+---
+
+# OFF behaviour
+
+The ISP15 was switched OFF using the official Carawater app.
+
+Immediately afterwards BLE Scanner initially displayed:
+
+```text
+00 00 00 00 00 00 00 00 00 30
+```
+
+However, a subsequent manual read of FF01 produced no displayed value.
+
+Therefore the short value above is **not considered a confirmed OFF-state packet**.
+
+It could represent:
+
+- a transitional response
+- cached data
+- a temporary controller state
+- another protocol message
+
+What can currently be stated with confidence:
+
+> After switching the ISP15 OFF, normal `AA 93 ...` FF01 telemetry was no longer available during the test.
+
+Further testing is required.
+
+---
+
+# Dynamic fields
+
+Earlier captures made while water was flowing showed several fields changing rapidly.
+
+Examples:
 
 ```text
 AA933514000085001700D400960012...
@@ -324,59 +480,66 @@ AA933514000084001900370196000D...
 AA933514000084001A00590196000B...
 ```
 
-This is useful because it strongly indicates that the first approximately 20 bytes contain the live measurements displayed by the app.
+These captures indicate that multiple fields near the beginning of FF01 represent live operating data.
 
-Likely candidates include:
+Likely candidates still to decode include:
 
-- voltage
-- current
-- temperature
-- pressure
-- flow
+- motor current
+- water pressure
+- real-time flow
 
-The exact byte positions and scaling factors are still being determined.
+Controlled tests with the pump running will be required to identify these fields reliably.
 
 ---
 
-# Packet ending
+# Final byte
 
-The last byte changes together with packet contents.
+The final byte of FF01 changes when packet contents change.
 
-Examples:
+Observed examples include:
 
 ```text
-...03
-...02
-...01
-...13
-...E8
-...0A
-...41
-...73
-...94
-...6E
+03
+02
+01
+13
+E8
+0A
+41
+73
+94
+6E
+36
+58
+76
+30
 ```
 
-This strongly suggests that the final byte may be a checksum or CRC.
+This may be a:
 
-⚠️ The checksum algorithm has not yet been identified.
+- checksum
+- CRC
+- sequence value
+- other integrity/status field
 
-Determining this will be important before generating commands for FF02.
+The algorithm or meaning is currently unknown.
+
+It should **not yet be described as a checksum with certainty**.
 
 ---
 
 # Connection behaviour
 
-The ISP15 appears to allow only one active BLE client connection.
+During testing:
 
-Observed behaviour:
+- The official Carawater app can connect successfully.
+- BLE Scanner on iOS can connect successfully.
+- The official app and BLE Scanner cannot be used with the ISP15 simultaneously.
+- Linux/BlueZ was able to initiate a connection during earlier testing but did not maintain it reliably.
 
-- The official Carawater app can maintain a stable connection.
-- A BLE scanner can also maintain a stable connection.
-- The official app and BLE scanner cannot interact with the device simultaneously.
-- Linux/BlueZ was able to initiate a connection but disconnected shortly afterwards during initial testing.
+The ISP15 therefore appears to support only one active BLE client connection in the tested setup.
 
-Therefore capturing app-generated FF02 commands requires a different approach than simply connecting a second BLE client.
+This makes direct observation of the official app's FF02 writes more difficult.
 
 ---
 
@@ -385,83 +548,109 @@ Therefore capturing app-generated FF02 commands requires a different approach th
 ## Confirmed
 
 - ISP15 uses Bluetooth Low Energy.
-- Custom service UUID is `FF00`.
-- `FF01` supports Read + Notify.
-- `FF02` supports Write + Write Without Response + Notify.
-- FF01 contains live device/status information.
-- FF01 packets start with `AA 93` in all observations so far.
-- Packet contents change when the pump runs.
-- Packet contents change between pressure levels 1, 2 and 3.
-- The official app can select pressure levels 1–3.
-- Only one BLE client appears to be usable at a time.
+- Custom service is `FF00`.
+- FF01 supports Read and Notify.
+- FF02 supports Write, Write Without Response and Notify.
+- FF01 carries status/telemetry data.
+- Normal observed FF01 frames begin with `AA 93`.
+- FF01 changes with the operating state.
+- Offset 2 changes with pressure level and other device states.
+- Pressure levels 1–3 produce reproducibly different offset-2 values under controlled stopped conditions.
+- Normal FF01 telemetry disappears when the ISP15 is switched OFF in the tested scenario.
 
-## Probable
+## Strong evidence
 
-- FF02 carries control commands.
-- Byte 2 contains several status/mode flags.
-- The final byte is a checksum/CRC.
-- Several live sensor values are contained in the first part of FF01.
+- Offset 6 represents supply voltage with scaling `/10`.
+- Offset 12 represents water temperature with scaling `/10`.
+- Offset 18 represents total water volume.
+- Offset 2 is a status/mode bit field.
+- Pressure-level information is encoded in offset 2.
+
+## Suspected
+
+- FF02 carries commands from the official app.
+- The final FF01 byte may be an integrity/checksum field.
 
 ## Unknown
 
-- Exact FF02 command format.
+- Exact bit layout of offset 2.
+- Motor current field.
+- Water pressure field.
+- Real-time flow field.
+- Daily water volume field.
+- Multi-byte format of total water volume.
 - ON command.
 - OFF command.
 - Level 1 command.
 - Level 2 command.
 - Level 3 command.
 - Reset command.
-- Exact field offsets for all measurements.
-- Scaling factors.
-- Checksum/CRC algorithm.
+- Final-byte algorithm/meaning.
 - Error-code representation.
 
 ---
 
 # Next steps
 
-The next reverse-engineering steps are:
-
-1. Capture writes sent by the official app to FF02.
-2. Identify commands for:
-   - ON
-   - OFF
-   - Level 1
-   - Level 2
-   - Level 3
-   - Reset
-3. Compare controlled FF01 captures against known app values.
-4. Determine byte offsets and scaling factors for:
+1. Build a read-only BLE test client.
+2. Read and log FF01 automatically.
+3. Decode the already strongly suspected fields:
    - voltage
-   - current
    - temperature
+   - total water volume
+4. Perform controlled running tests to identify:
+   - current
    - pressure
-   - flow
-   - daily volume
-   - total volume
-5. Determine the checksum/CRC algorithm.
-6. Build a small test client.
-7. Integrate the protocol with Home Assistant.
+   - real-time flow
+5. Investigate the individual bits of offset 2.
+6. Capture FF02 writes from the official app.
+7. Determine the command protocol.
+8. Only after commands are understood, test controlled writes.
+9. Build a Home Assistant integration.
+
+---
+
+# Safety during reverse engineering
+
+Until the FF02 protocol is understood:
+
+> Do not send guessed or random data to FF02.
+
+Reading FF01 is sufficient for the current analysis and avoids sending unknown commands to the pump controller.
 
 ---
 
 # Goal
 
-The long-term goal of this project is local control and monitoring of the Carawater ISP15 without requiring the official mobile application.
+The long-term goal is local monitoring and control of the Carawater ISP15 without requiring the official mobile application.
 
-Possible future integrations include:
+Potential integrations include:
 
-- Python BLE library
-- Raspberry Pi BLE client
-- Home Assistant integration
-- ESPHome BLE client
+- Python BLE client
+- Raspberry Pi / Linux
+- Home Assistant
+- ESPHome
+
+---
+
+# Raw captures
+
+Raw and controlled test data are stored in:
+
+```text
+captures/
+```
+
+Interpretations belong in this document, while raw observations are kept separately so hypotheses can be checked against the original measurements.
 
 ---
 
 # Disclaimer
 
-This project is an independent reverse-engineering effort and is not affiliated with or endorsed by Carawater.
+This is an independent reverse-engineering project and is not affiliated with or endorsed by Carawater.
 
-Use the information at your own risk.
+The documentation is based on observations of personally owned hardware and is intended for research and interoperability.
 
-The protocol documentation may contain errors while reverse engineering is still in progress.
+Information may change as the protocol becomes better understood.
+
+Use at your own risk.
