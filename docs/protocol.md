@@ -84,6 +84,42 @@ Normal observed status frames begin with:
 AA 93
 ```
 
+### FF01 notifications
+
+Testing with Python and the Bleak library on macOS confirmed that FF01 continuously provides telemetry using BLE notifications.
+
+A direct GATT read of FF01 returned an empty value during testing:
+
+```text
+FF01 Length: 0 Bytes
+```
+
+After enabling notifications on FF01, the ISP15 immediately started transmitting status frames.
+
+Observed properties:
+
+```text
+Frame length:     150 bytes
+Transport:        BLE notification
+Characteristic:  FF01
+```
+
+Example frame:
+
+```text
+AA93201400008900000012018C00000000003D000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000A003601040100000000000000000000000000000000000030
+```
+
+Multiple consecutive 150-byte frames were received successfully without writing any data to FF02.
+
+This confirms that passive monitoring of ISP15 telemetry is possible without sending control commands.
+
+### Important
+
+For client implementations, FF01 notifications should currently be preferred over direct reads.
+
+The command characteristic FF02 is not required to receive the observed telemetry.
+
 ---
 
 ### FF02 – commands
@@ -121,7 +157,13 @@ No guessed commands should be sent to the device.
 
 # FF01 status frame
 
-A typical FF01 frame starts with:
+A normal FF01 telemetry frame observed via notifications has a length of:
+
+```text
+150 bytes
+```
+
+and starts with:
 
 ```text
 AA 93
@@ -130,7 +172,7 @@ AA 93
 Example:
 
 ```text
-AA 93 25 14 00 00 88 00 00 00 14 01 8C 00 00 00 00 00 3D ...
+AA 93 20 14 00 00 89 00 00 00 12 01 8C 00 00 00 00 00 3D ...
 ```
 
 Several fields can already be correlated with values shown by the official app.
@@ -145,17 +187,17 @@ Offsets are zero-based.
 |---:|---|---|---|
 | 0 | `AA` | Frame header | Confirmed |
 | 1 | `93` | Frame type/header | Confirmed in observed normal frames |
-| 2 | `25` / `45` / `65` / `20` | Status / mode flags | Confirmed dynamic, encoding unknown |
+| 2 | `20` / `25` / `45` / `65` | Status / mode flags | Confirmed dynamic, encoding unknown |
 | 3 | `14` | Unknown | Unknown |
 | 4–5 | `00 00` | Unknown | Unknown |
-| 6 | `88` | Supply voltage, probably value / 10 | Strong evidence |
+| 6 | `88` / `89` | Supply voltage, probably value / 10 | Strong evidence |
 | 7–9 | varies | Unknown | Unknown |
 | 10–11 | varies | Unknown dynamic field | Unknown |
 | 12 | `8C` | Water temperature, probably value / 10 | Strong evidence |
 | 13–17 | varies / zero | Unknown | Unknown |
 | 18 | `3D` | Total water volume, at least for observed values | Strong evidence |
 | remaining | varies | Unknown | Unknown |
-| final byte | varies | Possible checksum / CRC | Suspected |
+| final byte | varies | Possible checksum / CRC / status field | Suspected |
 
 This table will be updated as more controlled captures become available.
 
@@ -169,7 +211,7 @@ During controlled testing the official app displayed:
 13.6 V
 ```
 
-At the same time, FF01 contained at offset 6:
+At approximately the same operating state, FF01 contained at offset 6:
 
 ```text
 88
@@ -190,19 +232,21 @@ Example:
 136 / 10 = 13.6 V
 ```
 
-Another capture contained:
+During later continuous notification testing the value changed between:
 
 ```text
-0x87 = 135
+0x88
+0x89
 ```
 
-which would represent:
+which would correspond to:
 
 ```text
-13.5 V
+13.6 V
+13.7 V
 ```
 
-A small voltage change between disconnecting the official app and reading with BLE Scanner is plausible.
+Small supply-voltage changes of this size are plausible.
 
 **Status: strong evidence, not yet considered fully confirmed.**
 
@@ -210,7 +254,7 @@ A small voltage change between disconnecting the official app and reading with B
 
 # Water temperature
 
-During all controlled tests the official app displayed:
+During the controlled tests the official app displayed:
 
 ```text
 14.0 °C
@@ -236,6 +280,8 @@ Example:
 0x8C = 140
 140 / 10 = 14.0 °C
 ```
+
+The same value remained stable across multiple consecutive BLE notification frames.
 
 **Status: strong evidence.**
 
@@ -267,7 +313,9 @@ Example:
 0x3D = 61
 ```
 
-Earlier captures also showed this field changing as the total value displayed by the app increased.
+The same value was also observed in multiple consecutive 150-byte notification frames.
+
+Earlier captures showed this field changing as the total value displayed by the app increased.
 
 The size and possible multi-byte representation of this counter still need to be investigated, especially for values above 255 L.
 
@@ -304,7 +352,7 @@ Level 2: 0x45
 Level 3: 0x65
 ```
 
-The difference between pressure levels is:
+The difference between the observed pressure levels is:
 
 ```text
 +0x20
@@ -318,7 +366,7 @@ However, offset 2 is **not simply the pressure-level number**.
 
 # Additional status flags
 
-After switching the ISP15 OFF using the official app and then switching it ON again, the following state was observed:
+After switching the ISP15 OFF using the official app and then switching it ON again, the following state was observed.
 
 Official app:
 
@@ -339,29 +387,37 @@ Immediately afterwards FF01 started with:
 AA 93 20 14 ...
 ```
 
-This is different from the previously observed stable Level 1 stopped state:
+This differs from the previously observed Level 1 stopped state:
 
 ```text
 AA 93 25 14 ...
 ```
 
-Therefore:
+Continuous notification testing later produced multiple consecutive frames with:
+
+```text
+AA 93 20 14 ...
+```
+
+Therefore `0x20` was not merely observed in a single transitional packet.
+
+Both:
 
 ```text
 0x20
 0x25
 ```
 
-can both occur while the official app reports Level 1.
+have been observed while the official app reported Level 1.
 
-This strongly suggests that offset 2 is a **bit field containing multiple status flags**, rather than a simple mode value.
+This strongly suggests that offset 2 is a **bit field containing multiple status flags**, rather than a simple pressure-mode value.
 
 Possible information encoded in this byte may include:
 
 - selected pressure level
-- initialization state
-- pump enabled state
+- controller enabled state
 - pump running/stopped state
+- initialization state
 - other controller status flags
 
 The individual bits have not yet been decoded.
@@ -458,13 +514,85 @@ It could represent:
 
 What can currently be stated with confidence:
 
-> After switching the ISP15 OFF, normal `AA 93 ...` FF01 telemetry was no longer available during the test.
+> After switching the ISP15 OFF, normal `AA 93 ...` FF01 telemetry was no longer available during that test.
 
 Further testing is required.
 
 ---
 
-# Dynamic fields
+# Direct read vs notifications
+
+A Python test client using Bleak was used to perform a direct GATT read of FF01.
+
+Connection succeeded:
+
+```text
+Connected: True
+```
+
+but the direct read returned:
+
+```text
+FF01 Length: 0 Bytes
+FF01 RAW:
+```
+
+Notifications were then enabled on the same characteristic.
+
+The ISP15 immediately started transmitting full telemetry frames:
+
+```text
+FF01 [150 Bytes]: AA932014...
+```
+
+Multiple consecutive frames were received successfully.
+
+This establishes the current recommended read strategy:
+
+```text
+Connect
+   ↓
+Subscribe to FF01 notifications
+   ↓
+Receive 150-byte telemetry frames
+   ↓
+Decode status values
+```
+
+No FF02 write is required for this process.
+
+---
+
+# Example continuous notification data
+
+The following frames were captured consecutively using Python/Bleak:
+
+```text
+AA93201400008800000013018C00000000003D...
+AA93201400008900000012018C00000000003D...
+AA93201400008900000012018C00000000003D...
+AA93201400008900000012018C00000000003D...
+```
+
+The frames remained largely stable while the pump was stopped.
+
+Only a small number of fields changed.
+
+For example:
+
+```text
+Offset 6:
+88 → 89
+
+Offset 10:
+13 → 12
+```
+
+This is useful for distinguishing slowly changing telemetry from fixed protocol fields.
+
+---
+
+# Dynamic fields while running
 
 Earlier captures made while water was flowing showed several fields changing rapidly.
 
@@ -515,16 +643,25 @@ E8
 30
 ```
 
-This may be a:
+During the latest stable notification test, multiple packets ended in:
+
+```text
+30
+```
+
+while some fields inside the packet changed slightly.
+
+Therefore the final byte should **not yet be assumed to be a simple checksum**.
+
+Possible explanations include:
 
 - checksum
 - CRC
-- sequence value
-- other integrity/status field
+- status field
+- sequence/state information
+- another protocol-specific value
 
-The algorithm or meaning is currently unknown.
-
-It should **not yet be described as a checksum with certainty**.
+Its meaning remains unknown.
 
 ---
 
@@ -534,12 +671,37 @@ During testing:
 
 - The official Carawater app can connect successfully.
 - BLE Scanner on iOS can connect successfully.
-- The official app and BLE Scanner cannot be used with the ISP15 simultaneously.
+- A Python/Bleak client on macOS can connect successfully.
+- FF01 notifications work reliably with Python/Bleak.
+- The official app and another BLE client cannot be used with the ISP15 simultaneously.
 - Linux/BlueZ was able to initiate a connection during earlier testing but did not maintain it reliably.
 
 The ISP15 therefore appears to support only one active BLE client connection in the tested setup.
 
 This makes direct observation of the official app's FF02 writes more difficult.
+
+---
+
+# Python / Bleak test environment
+
+The first successful independent BLE client was tested with:
+
+```text
+Platform: macOS
+Python:   3.13
+Bleak:    3.0.2
+```
+
+The client:
+
+1. discovers the ISP15 by BLE name
+2. connects using CoreBluetooth
+3. subscribes to FF01 notifications
+4. receives 150-byte status frames
+
+No write operation is required.
+
+This provides the basis for a future read-only ISP15 client.
 
 ---
 
@@ -553,10 +715,14 @@ This makes direct observation of the official app's FF02 writes more difficult.
 - FF02 supports Write, Write Without Response and Notify.
 - FF01 carries status/telemetry data.
 - Normal observed FF01 frames begin with `AA 93`.
+- Normal notification frames are 150 bytes long.
+- FF01 notifications can be received using Python/Bleak.
+- FF02 writes are not required to receive telemetry.
 - FF01 changes with the operating state.
 - Offset 2 changes with pressure level and other device states.
 - Pressure levels 1–3 produce reproducibly different offset-2 values under controlled stopped conditions.
-- Normal FF01 telemetry disappears when the ISP15 is switched OFF in the tested scenario.
+- Direct FF01 reads may return an empty value even while notifications provide telemetry.
+- Normal FF01 telemetry disappeared when the ISP15 was switched OFF in the tested scenario.
 
 ## Strong evidence
 
@@ -569,11 +735,12 @@ This makes direct observation of the official app's FF02 writes more difficult.
 ## Suspected
 
 - FF02 carries commands from the official app.
-- The final FF01 byte may be an integrity/checksum field.
+- The final FF01 byte may contain integrity or status information.
 
 ## Unknown
 
 - Exact bit layout of offset 2.
+- Meaning of `0x20` versus `0x25`.
 - Motor current field.
 - Water pressure field.
 - Real-time flow field.
@@ -592,21 +759,23 @@ This makes direct observation of the official app's FF02 writes more difficult.
 
 # Next steps
 
-1. Build a read-only BLE test client.
-2. Read and log FF01 automatically.
-3. Decode the already strongly suspected fields:
+1. Build a reusable read-only BLE client.
+2. Discover the ISP15 by device name rather than a fixed macOS identifier.
+3. Subscribe automatically to FF01 notifications.
+4. Decode the strongly suspected fields:
    - voltage
    - temperature
    - total water volume
-4. Perform controlled running tests to identify:
+5. Log raw 150-byte frames for further analysis.
+6. Perform controlled running tests to identify:
    - current
    - pressure
    - real-time flow
-5. Investigate the individual bits of offset 2.
-6. Capture FF02 writes from the official app.
-7. Determine the command protocol.
-8. Only after commands are understood, test controlled writes.
-9. Build a Home Assistant integration.
+7. Investigate the individual bits of offset 2.
+8. Capture FF02 writes from the official app.
+9. Determine the command protocol.
+10. Only after commands are understood, test controlled writes.
+11. Build a Home Assistant integration.
 
 ---
 
@@ -616,7 +785,7 @@ Until the FF02 protocol is understood:
 
 > Do not send guessed or random data to FF02.
 
-Reading FF01 is sufficient for the current analysis and avoids sending unknown commands to the pump controller.
+Reading and subscribing to FF01 is sufficient for the current analysis and avoids sending unknown commands to the pump controller.
 
 ---
 
