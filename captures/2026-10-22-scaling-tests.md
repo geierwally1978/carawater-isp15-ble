@@ -306,6 +306,105 @@ Referenzpunkte erforderlich.
 
 ---
 
+## Test 5 – Reset der Verbrauchszähler
+
+Die offizielle Carawater-App bietet eine Reset-Funktion für die
+Verbrauchszähler.
+
+Vor dem Reset wurden über FF01 folgende Werte empfangen:
+
+```text
+Tagesmenge:   17 L
+Gesamtmenge:  84 L
+```
+
+Die entsprechenden Felder waren:
+
+```text
+Offset 16 = 17
+Offset 18 = 84
+```
+
+Der Reset wurde anschließend über die offizielle Carawater-App
+ausgeführt.
+
+Dabei wurden **Tagesmenge und Gesamtmenge gemeinsam zurückgesetzt**.
+
+Nach dem Reset zeigte der FF01-Reader:
+
+```text
+Tagesmenge:   0 L
+Gesamtmenge:  0 L
+```
+
+Entsprechend wurden im Frame beobachtet:
+
+```text
+Offset 16 = 0
+Offset 18 = 0
+```
+
+Damit wird die bisherige Zuordnung weiter bestätigt:
+
+```text
+Offset 16 = Tagesmenge
+Offset 18 = Gesamtmenge
+```
+
+### Weitere Veränderungen im Frame
+
+Der Reset veränderte nicht nur Offset 16 und 18.
+
+Vor dem Reset enthielt der hintere Bereich des 150-Byte-Frames
+mehrere weitere Werte.
+
+Nach dem Reset waren große Teile dieses Bereichs auf `0x00` gesetzt.
+
+Dies ist ein deutlicher Hinweis darauf, dass im bislang nicht
+dekodierten hinteren Bereich des FF01-Frames weitere Verbrauchs-,
+Statistik- oder Zählerdaten gespeichert werden.
+
+Die genaue Bedeutung dieser Felder ist noch unbekannt.
+
+### RAW-Capture
+
+Die Messung unmittelbar nach dem Reset wurde als CSV gespeichert:
+
+```text
+captures/raw/2026-10-22-after-counter-reset.csv
+```
+
+Der Capture enthält vollständige 150-Byte-Frames inklusive Zeitstempel,
+dekodierten bekannten Feldern und geprüfter Checksumme.
+
+Beispiel unmittelbar nach dem Reset:
+
+```text
+Status:             0x21
+Pumpenstatus:       gestoppt
+Spannung:           13,6–13,7 V
+Wassertemperatur:   18,0 °C
+Strom RAW:          0
+Druck RAW:          377–379
+Durchfluss RAW:     0
+Tagesmenge:         0 L
+Gesamtmenge:        0 L
+Checksumme:         gültig
+```
+
+### Bewertung
+
+Die Zuordnung von Offset 16 und Offset 18 ist durch den gezielten
+Reset nun deutlich besser abgesichert.
+
+Noch ungeklärt bleibt insbesondere:
+
+- welche weiteren Felder durch den Reset gelöscht werden
+- welche Statistikwerte dort gespeichert sind
+- ob Tages- und Gesamtmenge intern noch mit höherer Auflösung geführt werden
+- wie Gesamtmengen oberhalb von 255 Litern dargestellt werden
+- welcher BLE-Befehl von der offiziellen App für den Reset verwendet wird
+
 ## Zwischenstand
 
 FF01 enthält inzwischen sehr wahrscheinlich alle wichtigen
