@@ -16,6 +16,28 @@ capture_file = None
 capture_writer = None
 
 
+def decode_pressure_level(status):
+    """
+    Konstantdruck-Stufe aus dem Status-Byte ermitteln.
+
+    Beobachtete Werte:
+        Stufe 1: 0x21 gestoppt / 0x31 läuft
+        Stufe 2: 0x41 gestoppt / 0x51 läuft
+        Stufe 3: 0x61 gestoppt / 0x71 läuft
+    """
+
+    mode_bits = status & 0x60
+
+    if mode_bits == 0x20:
+        return 1
+    elif mode_bits == 0x40:
+        return 2
+    elif mode_bits == 0x60:
+        return 3
+
+    return None
+
+
 def show_changes(data):
     global previous_frame
 
@@ -90,6 +112,7 @@ def create_capture_file():
         "timestamp",
         "frame_length",
         "status_hex",
+        "pressure_level",
         "pump_running",
         "voltage_v",
         "current_raw",
@@ -113,6 +136,7 @@ def create_capture_file():
 def save_frame(
     data,
     status,
+    pressure_level,
     pump_running,
     voltage,
     current_raw,
@@ -132,6 +156,7 @@ def save_frame(
         datetime.now().isoformat(timespec="milliseconds"),
         len(data),
         f"0x{status:02X}",
+        pressure_level if pressure_level is not None else "",
         pump_running,
         f"{voltage:.1f}",
         current_raw,
@@ -160,7 +185,20 @@ def decode_frame(data):
         print(data.hex().upper())
         return
 
+    # ---------------------------------------------------------
+    # Status
+    # ---------------------------------------------------------
+
     status = data[2]
+
+    pressure_level = decode_pressure_level(status)
+
+    # Bit 0x10 zeigt an, ob die Pumpe aktuell läuft.
+    pump_running = bool(status & 0x10)
+
+    # ---------------------------------------------------------
+    # Bekannte Messwerte
+    # ---------------------------------------------------------
 
     voltage = data[6] / 10.0
     current_raw = data[8]
@@ -177,11 +215,17 @@ def decode_frame(data):
     daily_water = data[16]
     total_water = data[18]
 
-    pump_running = bool(status & 0x10)
+    # ---------------------------------------------------------
+    # Prüfsumme
+    # ---------------------------------------------------------
 
     received_checksum = data[149]
     calculated_checksum = sum(data[:149]) & 0xFF
     checksum_ok = received_checksum == calculated_checksum
+
+    # ---------------------------------------------------------
+    # Ausgabe
+    # ---------------------------------------------------------
 
     now = datetime.now().strftime("%H:%M:%S")
 
@@ -205,6 +249,11 @@ def decode_frame(data):
 
     print(f"Status-Byte:       0x{status:02X}")
 
+    if pressure_level is not None:
+        print(f"Konstantdruck:     Stufe {pressure_level}")
+    else:
+        print("Konstantdruck:     unbekannt")
+
     if pump_running:
         print("Pumpenstatus:      läuft")
     else:
@@ -225,9 +274,14 @@ def decode_frame(data):
     print()
     print(f"RAW: {data.hex().upper()}")
 
+    # ---------------------------------------------------------
+    # Capture speichern
+    # ---------------------------------------------------------
+
     save_frame(
         data=data,
         status=status,
+        pressure_level=pressure_level,
         pump_running=pump_running,
         voltage=voltage,
         current_raw=current_raw,

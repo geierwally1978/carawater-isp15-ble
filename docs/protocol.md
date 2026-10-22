@@ -157,10 +157,10 @@ Der aktuelle Stand der Dekodierung:
 | 1 | 1 | Header | `0x93` | bestätigt |
 | 2 | 1 | Status- und Modus-Flags | Bitfeld | teilweise dekodiert |
 | 6 | 1 | Versorgungsspannung | RAW / 10 V | bestätigt |
-| 8 | 1 | Stromaufnahme | vermutlich RAW / 10 A | sehr wahrscheinlich |
-| 10–11 | 2 | Wasserdruck | Little Endian, Skalierung noch vorläufig | sehr wahrscheinlich |
+| 8 | 1 | Stromaufnahme | Skalierung noch offen | sehr wahrscheinlich |
+| 10–11 | 2 | Wasserdruck | Little Endian, Skalierung noch offen | sehr wahrscheinlich |
 | 12 | 1 | Wassertemperatur | RAW / 10 °C | bestätigt |
-| 14 | 1 | Echtzeit-Durchfluss | vermutlich RAW / 10 L/min | sehr wahrscheinlich |
+| 14 | 1 | Echtzeit-Durchfluss | Skalierung noch offen | sehr wahrscheinlich |
 | 16 | 1 | Tagesmenge | Liter | bestätigt |
 | 18 | 1 | Gesamtmenge | Liter bei bisher beobachteten Werten | bestätigt |
 | 149 | 1 | Prüfsumme | additive 8-Bit-Prüfsumme | bestätigt |
@@ -183,6 +183,8 @@ Beispiele:
 0x88 = 136 → 13,6 V
 0x83 = 131 → 13,1 V
 0x81 = 129 → 12,9 V
+0x7D = 125 → 12,5 V
+0x7C = 124 → 12,4 V
 ```
 
 Berechnung:
@@ -210,6 +212,7 @@ Beispiele:
 ```text
 0x8C = 140 → 14,0 °C
 0x96 = 150 → 15,0 °C
+0xAA = 170 → 17,0 °C
 0xD2 = 210 → 21,0 °C
 ```
 
@@ -239,23 +242,36 @@ Beobachtungen:
 Pumpe aus:
 RAW 0 → App 0,00 A
 
-Kontrollierter Betriebspunkt:
+Frühere kontrollierte Messung:
 RAW 21–22 → App 2,00 A
 
 Frühere Messung:
 RAW 23–24 → App ungefähr 2,30 A
 ```
 
-Aktuelle Arbeitshypothese:
+Am 22.10.2026 wurden weitere kontrollierte Messungen durchgeführt.
+
+Unter anderem wurden bei laufender Pumpe beobachtet:
+
+```text
+RAW 28–29 → App ungefähr 2,4–2,5 A
+RAW 26    → App ungefähr 2,4 A
+```
+
+Die Zuordnung von Offset 8 zur Stromaufnahme ist damit sehr
+wahrscheinlich.
+
+Die bisherige einfache Arbeitshypothese
 
 ```python
 current_A = frame[8] / 10.0
 ```
 
-Die Zuordnung von Offset 8 zur Stromaufnahme ist sehr wahrscheinlich.
+passt nicht exakt zu allen beobachteten Referenzwerten und gilt daher
+weiterhin nicht als bestätigt.
 
-Die exakte Skalierung `/ 10` benötigt noch weitere kontrollierte
-Messpunkte, bevor sie als bestätigt betrachtet wird.
+Weitere kontrollierte Messpunkte sind erforderlich, um die exakte
+Skalierung zu bestimmen.
 
 ---
 
@@ -277,22 +293,50 @@ pressure_raw = int.from_bytes(
 )
 ```
 
-Hochwertige Referenzpunkte:
+Die Little-Endian-Dekodierung wurde durch mehrere Messungen bestätigt.
+
+Beispiele:
+
+```text
+3C 01 → 0x013C → RAW 316
+E0 00 → 0x00E0 → RAW 224
+DB 00 → 0x00DB → RAW 219
+DD 00 → 0x00DD → RAW 221
+D1 00 → 0x00D1 → RAW 209
+06 01 → 0x0106 → RAW 262
+0A 01 → 0x010A → RAW 266
+67 01 → 0x0167 → RAW 359
+```
+
+Frühere Referenzpunkte:
 
 ```text
 RAW ≈ 386      → App 2,67 bar
 RAW ≈ 184–185  → App 1,21 bar
 ```
 
-Daraus ergibt sich derzeit als Arbeitshypothese:
+Weitere Messungen vom 22.10.2026:
+
+```text
+Stufe 3, Pumpe läuft:
+RAW ≈ 262–266 → App ungefähr 1,84 bar
+
+Stufe 3, Pumpe gestoppt:
+RAW ≈ 359 → App ungefähr 2,47 bar
+```
+
+Die bisherige Arbeitshypothese
 
 ```text
 Druck [bar] ≈ RAW × 0,00723 - 0,12
 ```
 
-Diese Formel ist **noch nicht bestätigt**.
+erklärt nicht alle beobachteten Referenzpunkte ausreichend genau.
 
-Weitere kontrollierte Referenzpunkte sind erforderlich.
+Die Zuordnung der Offsets 10–11 zum Wasserdruck sowie das
+Little-Endian-Format gelten als sehr gut belegt.
+
+Die endgültige Umrechnung von RAW nach bar ist jedoch noch offen.
 
 ---
 
@@ -310,23 +354,36 @@ Beobachtungen:
 Wasser aus:
 RAW 0 → App 0,0 L/min
 
-Kontrollierter Betriebspunkt:
+Frühere kontrollierte Messung:
 RAW 19 → App 2,0 L/min
 
 Frühere Messung:
 RAW 16–17 → App ungefähr 1,8 L/min
 ```
 
-Aktuelle Arbeitshypothese:
+Weitere kontrollierte Messungen vom 22.10.2026:
+
+```text
+Stufe 3, App 1,5 L/min:
+RAW 28
+RAW 30
+RAW 29
+```
+
+Damit ist die Zuordnung von Offset 14 zum Echtzeit-Durchfluss weiterhin
+sehr wahrscheinlich.
+
+Die bisherige einfache Arbeitshypothese
 
 ```python
 flow_lpm = frame[14] / 10.0
 ```
 
-Die Zuordnung von Offset 14 zum Echtzeit-Durchfluss ist sehr
-wahrscheinlich.
+passt jedoch nicht zu den neuen kontrollierten Messwerten und gilt
+daher ausdrücklich nicht als bestätigt.
 
-Die Skalierung `/ 10` wird vorerst noch als Arbeitshypothese behandelt.
+Die endgültige Skalierung muss mit weiteren Referenzmessungen bestimmt
+werden.
 
 ---
 
@@ -362,6 +419,13 @@ Offset 16 = 0 → 0 L Tagesmenge
 
 Die offizielle App setzte gleichzeitig ebenfalls die Tagesmenge auf
 0 Liter zurück.
+
+Bei späteren kontrollierten Wasserentnahmen wurde außerdem der
+erwartete Anstieg des Feldes beobachtet:
+
+```text
+7 → 8
+```
 
 Aktuelle Interpretation:
 
@@ -410,6 +474,13 @@ Offset 18 = 0 → 0 L Gesamtmenge
 Die offizielle App zeigte nach dem Reset ebenfalls 0 Liter
 Gesamtmenge an.
 
+Bei späteren kontrollierten Wasserentnahmen wurde außerdem der
+erwartete Anstieg des Feldes beobachtet:
+
+```text
+7 → 8
+```
+
 Aktuelle Interpretation:
 
 ```python
@@ -436,7 +507,35 @@ des 150-Byte-FF01-Frames auf `0x00` zurückgesetzt.
 Dies ist ein deutlicher Hinweis darauf, dass dort weitere
 Verbrauchs-, Statistik- oder Zählerdaten gespeichert werden.
 
-Die genaue Bedeutung dieser Felder ist derzeit noch unbekannt.
+Bei kontrollierten Wasserentnahmen am 22.10.2026 wurden außerdem
+Veränderungen im hinteren Bereich des Frames beobachtet.
+
+Unter anderem:
+
+```text
+Offset 119:
+60 → 70
+70 → 80
+```
+
+Diese Änderungen traten im Zusammenhang mit Wasserentnahmen und
+Änderungen der bekannten Literzähler auf.
+
+Bei einer weiteren Messung wurde außerdem eine Änderung an Offset 111
+beobachtet:
+
+```text
+Offset 111:
+60 → 70
+```
+
+Die genaue Bedeutung dieser Felder ist derzeit unbekannt.
+
+Insbesondere wird noch nicht angenommen, dass Offset 111 oder 119
+direkt eine bestimmte Verbrauchsgröße darstellen.
+
+Die Beobachtungen werden zunächst nur als mögliche zusätzliche
+Verbrauchs-, Statistik- oder Zählerfelder dokumentiert.
 
 Der vollständige RAW-Capture unmittelbar nach dem Reset befindet sich
 unter:
@@ -455,81 +554,151 @@ Offset:
 2
 ```
 
-Dieses Byte enthält mehrere Status- und Modusinformationen.
+Das Status-Byte enthält mehrere Status- und Modusinformationen.
 
-Beobachtete Werte sind unter anderem:
+Am 22.10.2026 wurden alle sechs Kombinationen aus Konstantdruckstufe
+1–3 und Pumpenstatus gestoppt/läuft kontrolliert getestet.
 
-```text
-0x20
-0x21
-0x25
-0x31
-0x45
-0x65
-```
+Dabei wurden folgende Werte beobachtet:
 
-Es handelt sich daher nicht um einen einfachen numerischen Statuswert,
-sondern sehr wahrscheinlich um ein Bitfeld beziehungsweise eine
-Kombination mehrerer Zustände.
+| Konstantdruck | Pumpe gestoppt | Pumpe läuft |
+|---|---:|---:|
+| Stufe 1 | `0x21` | `0x31` |
+| Stufe 2 | `0x41` | `0x51` |
+| Stufe 3 | `0x61` | `0x71` |
+
+Damit können Konstantdruckstufe und Pumpenstatus unabhängig
+voneinander aus dem Status-Byte dekodiert werden.
 
 ---
 
 ## Pumpenstatus
 
-Bei wiederholten kontrollierten Tests wurde beobachtet:
+Der Pumpenstatus wird durch Bit `0x10` dargestellt.
+
+Beispiele:
 
 ```text
-0x21 = Pumpe gestoppt
-0x31 = Pumpe läuft
+0x21 → Stufe 1, Pumpe gestoppt
+0x31 → Stufe 1, Pumpe läuft
+
+0x41 → Stufe 2, Pumpe gestoppt
+0x51 → Stufe 2, Pumpe läuft
+
+0x61 → Stufe 3, Pumpe gestoppt
+0x71 → Stufe 3, Pumpe läuft
 ```
 
-Der Unterschied beträgt:
-
-```text
-0x10
-```
-
-Aktuelle Interpretation:
+Dekodierung:
 
 ```python
 pump_running = bool(frame[2] & 0x10)
 ```
 
-Damit kennzeichnet Bit `0x10` sehr wahrscheinlich den laufenden
-Pumpenbetrieb.
-
 Status:
 
-**Stark bestätigt durch wiederholte Messungen.**
+**Bestätigt durch kontrollierte Messungen aller drei Konstantdruckstufen.**
 
 ---
 
 ## Konstantdruckstufe
 
-Bei gestoppter Pumpe wurden kontrolliert folgende Werte beobachtet:
+Die Konstantdruckstufe wird durch die Bits der Maske `0x60`
+im Status-Byte dargestellt.
+
+Beobachtete Zuordnung:
 
 ```text
-Stufe 1 → 0x25
-Stufe 2 → 0x45
-Stufe 3 → 0x65
+0x20 → Stufe 1
+0x40 → Stufe 2
+0x60 → Stufe 3
 ```
 
-Die Differenz zwischen den Druckstufen beträgt jeweils:
+Dekodierung:
+
+```python
+mode_bits = frame[2] & 0x60
+
+if mode_bits == 0x20:
+    pressure_level = 1
+elif mode_bits == 0x40:
+    pressure_level = 2
+elif mode_bits == 0x60:
+    pressure_level = 3
+else:
+    pressure_level = None
+```
+
+Für die bisher bekannten Werte ist auch folgende kompakte Dekodierung
+möglich:
+
+```python
+pressure_level = (frame[2] & 0x60) >> 5
+```
+
+Die kontrollierten Tests ergaben:
 
 ```text
-0x20
+Stufe 1:
+0x21 gestoppt
+0x31 läuft
+
+Stufe 2:
+0x41 gestoppt
+0x51 läuft
+
+Stufe 3:
+0x61 gestoppt
+0x71 läuft
 ```
 
-Damit ist klar, dass Informationen zur gewählten Konstantdruckstufe
-im Status-Byte enthalten sind.
+Status:
 
-Allerdings wurde bei aktivierter Stufe 1 ebenfalls `0x20` beziehungsweise
-`0x21` beobachtet.
+**Bestätigt.**
 
-Die Druckstufe kann deshalb derzeit noch nicht zuverlässig allein durch
-eine einfache Zuordnung des vollständigen Status-Bytes bestimmt werden.
+---
 
-Die genaue Bitbelegung muss weiter untersucht werden.
+## Weitere Status-Bits
+
+Bei allen sechs kontrollierten Testzuständen war zusätzlich Bit
+`0x01` gesetzt.
+
+Seine Bedeutung ist derzeit noch unbekannt.
+
+In früheren Messungen wurden außerdem Statuswerte wie
+
+```text
+0x25
+0x45
+0x65
+```
+
+beobachtet.
+
+Gegenüber den heute kontrolliert beobachteten Werten
+
+```text
+0x21
+0x41
+0x61
+```
+
+ist dort zusätzlich Bit `0x04` gesetzt.
+
+Die Bedeutung von Bit `0x04` ist noch nicht geklärt und darf nicht
+mit der Konstantdruckstufe verwechselt werden.
+
+Damit ist derzeit folgende Bitbelegung bekannt:
+
+```text
+0x60 → Konstantdruckstufe
+0x10 → Pumpe läuft
+0x04 → unbekannt
+0x01 → unbekannt
+```
+
+Die vollständige Bedeutung des Status-Bytes ist damit noch nicht
+geklärt.
 
 ---
 
@@ -619,7 +788,16 @@ def decode_frame(frame):
 
     status = frame[2]
 
+    mode_bits = status & 0x60
+
+    pressure_level = {
+        0x20: 1,
+        0x40: 2,
+        0x60: 3,
+    }.get(mode_bits)
+
     return {
+        "pressure_level": pressure_level,
         "pump_running": bool(status & 0x10),
         "voltage_v": frame[6] / 10.0,
         "current_raw": frame[8],
@@ -635,8 +813,8 @@ def decode_frame(frame):
     }
 ```
 
-Strom, Druck und Durchfluss werden im Beispiel bewusst teilweise noch
-als Rohwerte ausgegeben, solange ihre Skalierung nicht endgültig
+Strom, Druck und Durchfluss werden im Beispiel bewusst noch als
+Rohwerte ausgegeben, solange ihre Skalierung nicht endgültig
 bestätigt ist.
 
 ---
@@ -656,13 +834,18 @@ bestätigt ist.
 - Offset 16 = Tagesmenge für die bisher beobachteten Werte
 - Offset 18 = Gesamtmenge für die bisher beobachteten Werte
 - Reset über die Hersteller-App setzt beide Verbrauchszähler zurück
+- Status-Bit `0x10` = Pumpe läuft
+- Status-Maske `0x60` = Konstantdruckstufe
+- `0x20` = Konstantdruck Stufe 1
+- `0x40` = Konstantdruck Stufe 2
+- `0x60` = Konstantdruck Stufe 3
+- alle sechs Kombinationen aus Stufe 1–3 und Pumpe gestoppt/läuft wurden kontrolliert beobachtet
 
 ## Sehr wahrscheinlich
 
 - Offset 8 = Stromaufnahme
 - Offset 10–11 = Wasserdruck
 - Offset 14 = Echtzeit-Durchfluss
-- Status-Bit `0x10` = Pumpe läuft
 
 ## Noch offen
 
@@ -671,9 +854,11 @@ bestätigt ist.
 - endgültige Skalierung des Echtzeit-Durchflusses
 - Format der Gesamtmenge oberhalb von 255 L
 - vollständige Bitbelegung des Status-Bytes
-- genaue Kodierung der Konstantdruckstufen
+- Bedeutung von Status-Bit `0x01`
+- Bedeutung von Status-Bit `0x04`
 - Fehlerstatus / Fehlercodes
 - Bedeutung der übrigen FF01-Felder
+- Bedeutung der beobachteten Felder um Offset 111 und 119
 - Aufbau der FF02-Kommandos
 - EIN/AUS-Befehl
 - Auswahl Stufe 1/2/3
