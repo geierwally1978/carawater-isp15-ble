@@ -1,176 +1,364 @@
 # Carawater ISP15 BLE
 
-Reverse engineering and open documentation of the Bluetooth Low Energy protocol used by the **Carawater ISP15** water pump.
+Reverse Engineering und Dokumentation des Bluetooth-Low-Energy-Protokolls
+der **Carawater ISP15 Druckwasserpumpe**.
 
-> 🚧 **Work in progress**
->
-> The protocol is currently being reverse engineered.  
-> Reading status data is already possible, while control commands are still under investigation.
+Ziel des Projekts ist es, die ISP15 unabhängig von der Hersteller-App lokal
+auslesen und später steuern zu können.
 
-## 🎯 Project goal
+Ein langfristiges Ziel ist eine lokale Integration in **Home Assistant**.
 
-The goal is to understand and document the BLE protocol of the Carawater ISP15 in order to enable **local monitoring and control without the official mobile app**.
-
-Possible future integrations:
-
-- Home Assistant
-- ESPHome
-- Raspberry Pi / Linux
-- Python BLE clients
-
-The main target for this project is a **Home Assistant integration**.
+> **Projektstatus:** Reverse Engineering läuft.  
+> Die Telemetrie über FF01 ist bereits in großen Teilen verstanden.
+> Das Steuerprotokoll über FF02 ist noch nicht dekodiert.
 
 ---
 
-## 🔵 BLE interface
+## Ziele
 
-The ISP15 exposes the following custom BLE service:
+Das Projekt soll unter anderem folgende Funktionen ermöglichen:
+
+- lokale BLE-Kommunikation mit der ISP15
+- Auslesen der Live-Telemetrie
+- Dekodierung der Messwerte
+- Erkennen des Pumpenstatus
+- Auslesen der gewählten Konstantdruckstufe
+- lokale Steuerung ohne Hersteller-App
+- spätere Integration in Home Assistant
+
+Die Analyse erfolgt schrittweise anhand kontrollierter Messungen und
+aufgezeichneter BLE-Frames.
+
+---
+
+## Aktueller Stand
+
+### Telemetrie
+
+Die ISP15 stellt über die BLE-Charakteristik **FF01** regelmäßig
+Telemetriedaten bereit.
+
+Normale Frames:
 
 ```text
-Service
-FF00
-
-Status / data
-FF01 – READ, NOTIFY
-
-Commands
-FF02 – WRITE, WRITE_NO_RESPONSE, NOTIFY
+Header: AA 93
+Länge:  150 Byte
 ```
 
-Full UUIDs:
+FF01 muss lediglich per **Notify** abonniert werden.
+
+Ein vorheriger Schreibzugriff auf FF02 ist für den Empfang der
+Telemetrie nicht erforderlich.
+
+### Bereits identifizierte Werte
+
+| Wert | Stand |
+|---|---|
+| Versorgungsspannung | ✅ bestätigt |
+| Wassertemperatur | ✅ bestätigt |
+| Prüfsumme | ✅ bestätigt |
+| Pumpenstatus | 🟢 stark bestätigt |
+| Stromaufnahme | 🟡 Feld identifiziert, Skalierung noch in Prüfung |
+| Wasserdruck | 🟡 Feld identifiziert, Skalierung noch in Prüfung |
+| Echtzeit-Durchfluss | 🟡 Feld identifiziert, Skalierung noch in Prüfung |
+| Tagesmenge | 🟢 sehr wahrscheinlich |
+| Gesamtmenge | 🟢 sehr wahrscheinlich |
+| Konstantdruckstufe | 🟡 teilweise dekodiert |
+| Fehlerstatus | 🔴 noch offen |
+| Steuerbefehle FF02 | 🔴 noch offen |
+
+Details befinden sich in:
+
+```text
+docs/protocol.md
+```
+
+---
+
+## BLE-Schnittstelle
+
+Beobachteter Gerätename:
+
+```text
+ISP_42_539c
+```
+
+### Custom Service
 
 ```text
 0000FF00-0000-1000-8000-00805F9B34FB
+```
+
+### FF01 – Telemetrie
+
+```text
 0000FF01-0000-1000-8000-00805F9B34FB
+```
+
+Eigenschaften:
+
+```text
+Read
+Notify
+```
+
+### FF02 – Steuerung
+
+```text
 0000FF02-0000-1000-8000-00805F9B34FB
 ```
 
-Observed status packets currently start with:
+Eigenschaften:
 
 ```text
-AA 93
+Notify
+Write
+Write Without Response
+```
+
+FF02 ist sehr wahrscheinlich für Steuerbefehle vorgesehen.
+
+Das genaue Befehlsformat ist derzeit noch unbekannt.
+
+---
+
+## Aktuell bekannte FF01-Felder
+
+| Offset | Bedeutung | Aktueller Stand |
+|---:|---|---|
+| 0 | Header `0xAA` | bestätigt |
+| 1 | Header `0x93` | bestätigt |
+| 2 | Status / Modus | teilweise dekodiert |
+| 6 | Versorgungsspannung | bestätigt |
+| 8 | Stromaufnahme | sehr wahrscheinlich |
+| 10–11 | Wasserdruck | sehr wahrscheinlich |
+| 12 | Wassertemperatur | bestätigt |
+| 14 | Echtzeit-Durchfluss | sehr wahrscheinlich |
+| 16 | Tagesmenge | sehr wahrscheinlich |
+| 18 | Gesamtmenge | sehr wahrscheinlich |
+| 149 | Prüfsumme | bestätigt |
+
+Beispielsweise werden Spannung und Temperatur direkt mit Faktor 10
+übertragen:
+
+```text
+RAW 131 → 13,1 V
+RAW 210 → 21,0 °C
+```
+
+Die Prüfsumme ist eine additive 8-Bit-Prüfsumme:
+
+```python
+checksum = sum(frame[:149]) & 0xFF
 ```
 
 ---
 
-## 🔍 What has been discovered?
+## Pumpenstatus
 
-Current reverse-engineering progress:
-
-| Feature | Status |
-|---|---|
-| BLE service discovery | ✅ Confirmed |
-| Status characteristic FF01 | ✅ Confirmed |
-| Command characteristic FF02 | ✅ Confirmed |
-| Reading status packets | ✅ Working |
-| Pump running/stopped detection | 🧪 Under investigation |
-| Pressure level detection | 🧪 Under investigation |
-| Voltage | 🧪 Decoding in progress |
-| Current | 🧪 Decoding in progress |
-| Water temperature | 🧪 Decoding in progress |
-| Water pressure | 🧪 Decoding in progress |
-| Water flow | 🧪 Decoding in progress |
-| Daily water volume | ❓ Unknown |
-| Total water volume | ❓ Unknown |
-| ON/OFF command | ❓ Unknown |
-| Pressure level 1 command | ❓ Unknown |
-| Pressure level 2 command | ❓ Unknown |
-| Pressure level 3 command | ❓ Unknown |
-| Reset command | ❓ Unknown |
-| Checksum / CRC | 🧪 Under investigation |
-
----
-
-## 📊 Available data
-
-The official Carawater application displays several values that appear to be transmitted through FF01:
-
-- Supply voltage
-- Current
-- Water temperature
-- Water pressure
-- Real-time water flow
-- Daily water volume
-- Total water volume
-- Pump running/stopped
-- Error status
-- Constant-pressure level 1–3
-
-Controlled BLE captures have already been recorded for different operating states and pressure levels.
-
----
-
-## 📖 Protocol documentation
-
-Detailed reverse-engineering notes, packet examples and current findings are available here:
-
-➡️ [BLE protocol documentation](docs/protocol.md)
-
-The documentation distinguishes between:
-
-- **Confirmed** observations
-- **Probable** interpretations
-- **Unknown** protocol fields
-
-This is important because the protocol is still being analysed.
-
----
-
-## 🧪 Test device
-
-Current development and testing is performed with:
+Bei kontrollierten Tests wurden unter anderem folgende Statuswerte
+beobachtet:
 
 ```text
-Device:   Carawater ISP15
-BLE name: ISP_42_539c
+0x21 = Pumpe gestoppt
+0x31 = Pumpe läuft
 ```
 
-The BLE name may differ between individual ISP15 units.
+Daraus ergibt sich:
+
+```python
+pump_running = bool(status_byte & 0x10)
+```
+
+Bit `0x10` kennzeichnet damit sehr wahrscheinlich den laufenden
+Pumpenbetrieb.
 
 ---
 
-## 🛠️ Planned next steps
+## Erste Skalierungsergebnisse
 
-The next major goal is capturing and decoding commands sent by the official application to **FF02**.
+Bei kontrollierten Messungen konnten unter anderem folgende
+App-/BLE-Zuordnungen ermittelt werden.
 
-Especially:
+### Strom
 
 ```text
-ON
-OFF
-Pressure Level 1
-Pressure Level 2
-Pressure Level 3
-Reset
+RAW 0      → 0,00 A
+RAW 21–22  → 2,00 A
+RAW 23–24  → ungefähr 2,30 A
 ```
 
-After the command protocol is understood, the plan is to create a small BLE client and eventually integrate the ISP15 into Home Assistant.
+Aktuelle Arbeitshypothese:
+
+```text
+Strom [A] ≈ RAW / 10
+```
+
+### Echtzeit-Durchfluss
+
+```text
+RAW 0      → 0,0 L/min
+RAW 19     → 2,0 L/min
+RAW 16–17  → ungefähr 1,8 L/min
+```
+
+Aktuelle Arbeitshypothese:
+
+```text
+Durchfluss [L/min] ≈ RAW / 10
+```
+
+### Wasserdruck
+
+Zwei besonders gute Referenzpunkte:
+
+```text
+RAW ≈ 386      → 2,67 bar
+RAW ≈ 184–185  → 1,21 bar
+```
+
+Aktuelle Arbeitshypothese:
+
+```text
+Druck [bar] ≈ RAW × 0,00723 - 0,12
+```
+
+Diese Skalierungen sind noch nicht endgültig bestätigt.
 
 ---
 
-## 🤝 Contributions
+## Repository-Struktur
 
-Additional captures and information from other ISP15 owners are welcome.
+```text
+carawater-isp15-ble/
+├── README.md
+├── captures/
+│   ├── README.md
+│   ├── 2026-10-19-pressure-levels.md
+│   ├── 2026-10-21-controlled-tests.md
+│   └── 2026-10-22-scaling-tests.md
+└── docs/
+    └── protocol.md
+```
 
-Useful contributions include:
+### `docs/protocol.md`
 
-- BLE captures
-- FF01 status packets
-- FF02 command packets
-- observations from different ISP15 firmware versions
-- decoded packet fields
-- checksum / CRC analysis
+Enthält den aktuellen technischen Stand des dekodierten BLE-Protokolls.
 
-Please include the corresponding pump state and values displayed by the official app whenever possible.
+### `captures/`
+
+Enthält die Rohdaten und kontrollierten Messreihen, auf denen die
+Protokollanalyse basiert.
+
+Die Trennung ist bewusst gewählt:
+
+**Captures = Messdaten und Belege**  
+**Protocol = daraus abgeleitete technische Erkenntnisse**
 
 ---
 
-## ⚠️ Disclaimer
+## Testumgebung
 
-This is an independent community reverse-engineering project.
+Für die bisherigen Tests wurden unter anderem verwendet:
 
-It is **not affiliated with, supported by, or endorsed by Carawater**.
+- offizielle Carawater-App
+- BLE Scanner auf iOS
+- Python
+- Bleak
+- macOS
+- Linux
 
-All information is provided for research and interoperability purposes and may contain errors while reverse engineering is still in progress.
+Die aktuelle Python-Testumgebung:
 
-Use at your own risk.
+```text
+Python 3.13
+Bleak 3.0.2
+```
+
+Unter macOS wurde bestätigt, dass FF01 nach dem Abonnieren von
+Notifications selbstständig ungefähr alle zwei Sekunden einen
+150-Byte-Telemetrieframe liefert.
+
+---
+
+## Apple CoreBluetooth
+
+Unter macOS und iOS wird für BLE-Geräte keine klassische MAC-Adresse
+verwendet, sondern eine CoreBluetooth-UUID.
+
+Diese UUID kann sich zwischen Geräten beziehungsweise Apple-Systemen
+unterscheiden.
+
+Eine Anwendung sollte daher nicht auf eine fest eingetragene
+CoreBluetooth-UUID angewiesen sein.
+
+Der bisherige Python-Testclient sucht stattdessen nach:
+
+```text
+ISP_42_539c
+```
+
+---
+
+## Sicherheit
+
+Das Format der Steuerbefehle über FF02 ist derzeit nicht bekannt.
+
+Daher gilt für dieses Projekt momentan:
+
+> **Keine geratenen oder experimentell konstruierten Schreibbefehle an FF02.**
+
+Die Analyse konzentriert sich zunächst auf die lesende Telemetrie.
+
+Steuerbefehle werden erst untersucht, wenn ihr Aufbau anhand belastbarer
+Daten nachvollzogen werden kann.
+
+---
+
+## Nächste Schritte
+
+Geplant sind:
+
+1. Skalierung der Stromaufnahme weiter bestätigen
+2. Skalierung des Echtzeit-Durchflusses weiter bestätigen
+3. Druckskalierung mit zusätzlichen Referenzpunkten prüfen
+4. Gesamtmengenzähler oberhalb von 255 Litern untersuchen
+5. Status-Byte vollständig dekodieren
+6. Konstantdruckstufen vollständig dekodieren
+7. Fehlerstatus untersuchen
+8. FF02-Kommandostruktur analysieren
+9. EIN/AUS, Stufe 1/2/3 und Reset verstehen
+10. lokalen ISP15-Client entwickeln
+11. Home-Assistant-Integration vorbereiten
+
+---
+
+## Mitarbeit
+
+Weitere Messungen, BLE-Captures oder Informationen zum ISP15-Protokoll
+sind willkommen.
+
+Besonders hilfreich wären:
+
+- dokumentierte FF01-Felder
+- Skalierungsfaktoren
+- Informationen zur Bitbelegung des Status-Bytes
+- FF02-Befehlsformat
+- Aufzeichnungen der Kommunikation der offiziellen App
+- Informationen zu Prüfsummen oder weiteren Frame-Typen
+
+Bitte bei Messdaten möglichst immer die gleichzeitig beziehungsweise
+unmittelbar davor oder danach in der offiziellen App angezeigten Werte
+mit dokumentieren.
+
+---
+
+## Haftungsausschluss
+
+Dieses Projekt ist ein unabhängiges Reverse-Engineering-Projekt und
+steht in keiner Verbindung zum Hersteller der Carawater ISP15.
+
+Alle Informationen basieren auf eigenen Beobachtungen und Messungen.
+
+Die Nutzung der hier veröffentlichten Informationen erfolgt auf
+eigene Verantwortung.
