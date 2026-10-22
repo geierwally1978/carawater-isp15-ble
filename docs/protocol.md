@@ -1,57 +1,62 @@
-# Carawater ISP15 BLE Protocol
+# Carawater ISP15 – BLE-Protokoll
 
-> Reverse-engineering notes for the Bluetooth Low Energy protocol used by the Carawater ISP15 water pump.
+Diese Datei dokumentiert den aktuellen Stand des Reverse Engineerings
+des Bluetooth-Low-Energy-Protokolls der Carawater ISP15.
 
-## Project status
+Der Schwerpunkt liegt zunächst auf der rein lesenden Telemetrie über FF01.
 
-🚧 **Work in progress**
-
-This protocol is currently being reverse engineered using controlled comparisons between values displayed by the official Carawater app and raw BLE data.
-
-The current focus is the `FF01` status characteristic.
-
-No unknown or guessed commands have been written to `FF02`.
+> **Wichtig:** Einige Felder und Skalierungen sind noch nicht vollständig
+> bestätigt. Vermutungen werden ausdrücklich als solche gekennzeichnet.
 
 ---
 
-# Device
+## BLE-Gerät
 
-Tested device:
+Beobachteter Gerätename:
 
-| Property | Value |
-|---|---|
-| Device | Carawater ISP15 |
-| BLE name | `ISP_42_539c` |
-| BLE type | Bluetooth Low Energy |
-| Pairing | Not required during current tests |
+```text
+ISP_42_539c
+```
 
-The BLE name may differ between individual ISP15 units.
+Die vom Betriebssystem angezeigte Geräte-ID ist plattformabhängig.
+
+Unter Linux wurde beispielsweise folgende BLE-Adresse beobachtet:
+
+```text
+9C:53:BF:10:5E:E7
+```
+
+Unter Apple-Systemen wird stattdessen eine CoreBluetooth-UUID verwendet.
+Diese kann sich zwischen macOS und iOS unterscheiden.
+
+Eine Integration sollte das Gerät deshalb bevorzugt über den
+BLE-Gerätenamen finden und keine Apple-CoreBluetooth-UUID fest eintragen.
 
 ---
 
-# GATT structure
+# GATT-Struktur
 
 ## Device Information Service
 
-Service:
+UUID:
 
 ```text
-0x180A
+0000180A-0000-1000-8000-00805F9B34FB
 ```
 
-Observed characteristics:
+Beobachtete Characteristics:
 
-| UUID | Description | Properties |
+| UUID | Bedeutung | Eigenschaft |
 |---|---|---|
-| `0x2A24` | Model Number String | Read |
-| `0x2A25` | Serial Number String | Read |
-| `0x2A27` | Hardware Revision String | Read |
-| `0x2A28` | Software Revision String | Read |
-| `0x2A29` | Manufacturer Name String | Read |
+| 2A24 | Model Number String | Read |
+| 2A25 | Serial Number String | Read |
+| 2A27 | Hardware Revision String | Read |
+| 2A28 | Software Revision String | Read |
+| 2A29 | Manufacturer Name String | Read |
 
 ---
 
-## Custom ISP15 Service
+## Carawater Custom Service
 
 Service UUID:
 
@@ -59,9 +64,7 @@ Service UUID:
 0000FF00-0000-1000-8000-00805F9B34FB
 ```
 
-Two custom characteristics were discovered.
-
-### FF01 – status / telemetry
+### FF01 – Telemetrie
 
 UUID:
 
@@ -69,61 +72,26 @@ UUID:
 0000FF01-0000-1000-8000-00805F9B34FB
 ```
 
-Properties:
+Eigenschaften:
 
 ```text
-READ
-NOTIFY
+Read
+Notify
 ```
 
-FF01 carries status and telemetry information from the ISP15.
+FF01 liefert die laufenden Status- und Messdaten des ISP15.
 
-Normal observed status frames begin with:
+Ein direkter GATT-Read lieferte bei den bisherigen Tests keine Nutzdaten.
 
-```text
-AA 93
-```
+Nach Aktivierung von Notifications werden dagegen automatisch ungefähr
+alle zwei Sekunden Telemetrieframes übertragen.
 
-### FF01 notifications
-
-Testing with Python and the Bleak library on macOS confirmed that FF01 continuously provides telemetry using BLE notifications.
-
-A direct GATT read of FF01 returned an empty value during testing:
-
-```text
-FF01 Length: 0 Bytes
-```
-
-After enabling notifications on FF01, the ISP15 immediately started transmitting status frames.
-
-Observed properties:
-
-```text
-Frame length:     150 bytes
-Transport:        BLE notification
-Characteristic:  FF01
-Interval:         approximately 2 seconds
-```
-
-Example frame:
-
-```text
-AA93201400008900000010018C00000000003D000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000014000A00360104010000000000000000000000000000000000002E
-```
-
-Multiple consecutive 150-byte frames were received successfully without writing any data to FF02.
-
-This confirms that passive monitoring of ISP15 telemetry is possible without sending control commands.
-
-### Important
-
-For client implementations, FF01 notifications should currently be preferred over direct reads.
-
-The command characteristic FF02 is not required to receive the observed telemetry.
+Für den Empfang der Telemetrie ist kein vorheriger Schreibzugriff auf
+FF02 erforderlich.
 
 ---
 
-### FF02 – commands
+### FF02 – Steuerung
 
 UUID:
 
@@ -131,720 +99,539 @@ UUID:
 0000FF02-0000-1000-8000-00805F9B34FB
 ```
 
-Properties:
+Eigenschaften:
 
 ```text
-WRITE
-WRITE_NO_RESPONSE
-NOTIFY
+Notify
+Write
+Write Without Response
 ```
 
-FF02 is the most likely characteristic used by the official app to control the ISP15.
+FF02 ist sehr wahrscheinlich für Steuerbefehle vorgesehen.
 
-Expected commands include:
+Mögliche Befehle sind unter anderem:
 
-- ON
-- OFF
-- Pressure Level 1
-- Pressure Level 2
-- Pressure Level 3
+- Anlage EIN/AUS
+- Konstantdruck Stufe 1
+- Konstantdruck Stufe 2
+- Konstantdruck Stufe 3
 - Reset
 
-The actual command format has **not yet been captured or confirmed**.
+Das Befehlsformat ist derzeit noch nicht bekannt.
 
-No guessed commands should be sent to the device.
+**Bis das Format verstanden ist, werden keine geratenen Schreibbefehle
+an FF02 gesendet.**
 
 ---
 
-# FF01 status frame
+# FF01-Telemetrieframe
 
-A normal FF01 telemetry frame observed via notifications has a length of:
-
-```text
-150 bytes
-```
-
-and starts with:
+Normale FF01-Telemetrieframes beginnen mit:
 
 ```text
 AA 93
 ```
 
-Example:
+Die bisher beobachteten normalen Telemetrieframes besitzen eine feste
+Länge von:
 
 ```text
-AA 93 20 14 00 00 89 00 00 00 10 01 8C 00 00 00 00 00 3D ...
+150 Byte
 ```
 
-Several fields can already be correlated with values shown by the official app.
+Beispiel:
 
-The final byte at offset 149 is an additive 8-bit checksum.
+```text
+AA 93 21 14 00 00 83 00 00 00 82 01 96 00 00 00 0F 00 53 ...
+```
 
 ---
 
-# Current field map
+# Bekannte Felder
 
-Offsets are zero-based.
+Der aktuelle Stand der Dekodierung:
 
-| Offset | Example | Current interpretation | Confidence |
-|---:|---|---|---|
-| 0 | `AA` | Frame header | Confirmed |
-| 1 | `93` | Frame type/header | Confirmed in observed normal frames |
-| 2 | `20` / `25` / `45` / `65` | Status / mode flags | Confirmed dynamic, encoding unknown |
-| 3 | `14` | Unknown | Unknown |
-| 4–5 | `00 00` | Unknown | Unknown |
-| 6 | `88` / `89` | Supply voltage, probably value / 10 | Strong evidence |
-| 7–9 | varies | Unknown | Unknown |
-| 10–11 | varies | Unknown dynamic field | Unknown |
-| 12 | `8C` | Water temperature, probably value / 10 | Strong evidence |
-| 13–17 | varies / zero | Unknown | Unknown |
-| 18 | `3D` | Total water volume, at least for observed values | Strong evidence |
-| 19–148 | varies / mostly zero | Unknown / additional telemetry and configuration | Unknown |
-| 149 | `2D` / `2E` / `2F` etc. | Additive 8-bit checksum | Confirmed |
+| Offset | Länge | Bedeutung | Skalierung / Format | Stand |
+|---:|---:|---|---|---|
+| 0 | 1 | Header | `0xAA` | bestätigt |
+| 1 | 1 | Header | `0x93` | bestätigt |
+| 2 | 1 | Status- und Modus-Flags | Bitfeld | teilweise dekodiert |
+| 6 | 1 | Versorgungsspannung | RAW / 10 V | bestätigt |
+| 8 | 1 | Stromaufnahme | vermutlich RAW / 10 A | sehr wahrscheinlich |
+| 10–11 | 2 | Wasserdruck | Little Endian, Skalierung noch vorläufig | sehr wahrscheinlich |
+| 12 | 1 | Wassertemperatur | RAW / 10 °C | bestätigt |
+| 14 | 1 | Echtzeit-Durchfluss | vermutlich RAW / 10 L/min | sehr wahrscheinlich |
+| 16 | 1 | Tagesmenge | Liter | sehr wahrscheinlich |
+| 18 | 1 | Gesamtmenge | Liter bei bisher beobachteten Werten | sehr wahrscheinlich |
+| 149 | 1 | Prüfsumme | additive 8-Bit-Prüfsumme | bestätigt |
 
-This table will be updated as more controlled captures become available.
+Die Bedeutung der übrigen Bytes ist noch nicht vollständig geklärt.
 
 ---
 
-# Supply voltage
+# Versorgungsspannung
 
-During controlled testing the official app displayed:
-
-```text
-13.6 V
-```
-
-At approximately the same operating state, FF01 contained at offset 6:
+Offset:
 
 ```text
-88
+6
 ```
 
-Hexadecimal `0x88` equals decimal `136`.
-
-This strongly suggests:
+Beispiele:
 
 ```text
-voltage = byte[6] / 10
+0x88 = 136 → 13,6 V
+0x83 = 131 → 13,1 V
+0x81 = 129 → 12,9 V
 ```
 
-Example:
+Berechnung:
 
-```text
-0x88 = 136
-136 / 10 = 13.6 V
+```python
+voltage = frame[6] / 10.0
 ```
 
-During later continuous notification testing the value changed between:
+Status:
 
-```text
-0x88
-0x89
-```
-
-which would correspond to:
-
-```text
-13.6 V
-13.7 V
-```
-
-Small supply-voltage changes of this size are plausible.
-
-**Status: strong evidence, not yet considered fully confirmed.**
+**Bestätigt.**
 
 ---
 
-# Water temperature
+# Wassertemperatur
 
-During the controlled tests the official app displayed:
-
-```text
-14.0 °C
-```
-
-FF01 consistently contained at offset 12:
+Offset:
 
 ```text
-8C
+12
 ```
 
-Hexadecimal `0x8C` equals decimal `140`.
-
-This strongly suggests:
+Beispiele:
 
 ```text
-water_temperature = byte[12] / 10
+0x8C = 140 → 14,0 °C
+0x96 = 150 → 15,0 °C
+0xD2 = 210 → 21,0 °C
 ```
 
-Example:
+Berechnung:
 
-```text
-0x8C = 140
-140 / 10 = 14.0 °C
+```python
+water_temperature = frame[12] / 10.0
 ```
 
-The same value remained stable across multiple consecutive BLE notification frames.
+Status:
 
-**Status: strong evidence.**
-
-A future test at a different water temperature is required for final confirmation.
+**Bestätigt.**
 
 ---
 
-# Total water volume
+# Stromaufnahme
 
-During controlled testing the official app displayed:
-
-```text
-Total flow: 61 L
-```
-
-FF01 contained at offset 18:
+Offset:
 
 ```text
-3D
+8
 ```
 
-Hexadecimal `0x3D` equals decimal `61`.
-
-This strongly suggests that this field contains the total water volume.
-
-Example:
+Beobachtungen:
 
 ```text
-0x3D = 61
+Pumpe aus:
+RAW 0 → App 0,00 A
+
+Kontrollierter Betriebspunkt:
+RAW 21–22 → App 2,00 A
+
+Frühere Messung:
+RAW 23–24 → App ungefähr 2,30 A
 ```
 
-The same value was also observed in multiple consecutive 150-byte notification frames.
+Aktuelle Arbeitshypothese:
 
-Earlier captures showed this field changing as the total value displayed by the app increased.
+```python
+current_A = frame[8] / 10.0
+```
 
-The size and possible multi-byte representation of this counter still need to be investigated, especially for values above 255 L.
+Die Zuordnung von Offset 8 zur Stromaufnahme ist sehr wahrscheinlich.
 
-**Status: strong evidence.**
+Die exakte Skalierung `/ 10` benötigt noch weitere kontrollierte
+Messpunkte, bevor sie als bestätigt betrachtet wird.
 
 ---
 
-# Status / mode byte
+# Wasserdruck
 
-Offset 2 is one of the most interesting fields currently under investigation.
-
-Controlled tests were performed with:
-
-- no water tap opened
-- pump motor stopped
-- same temperature
-- same total water volume
-- nearly identical supply voltage
-- only the pressure level changed
-
-The following values were observed:
-
-| State | Offset 2 |
-|---|---:|
-| Level 1, stopped | `0x25` |
-| Level 2, stopped | `0x45` |
-| Level 3, stopped | `0x65` |
-
-This gives the pattern:
+Offsets:
 
 ```text
-Level 1: 0x25
-Level 2: 0x45
-Level 3: 0x65
+10–11
 ```
 
-The difference between the observed pressure levels is:
+Der Wert wird als 16-Bit-Zahl in Little-Endian-Reihenfolge übertragen:
+
+```python
+pressure_raw = int.from_bytes(
+    frame[10:12],
+    byteorder="little",
+    signed=False
+)
+```
+
+Hochwertige Referenzpunkte:
 
 ```text
-+0x20
+RAW ≈ 386      → App 2,67 bar
+RAW ≈ 184–185  → App 1,21 bar
 ```
 
-This is strong evidence that pressure-level information is encoded in this byte.
+Daraus ergibt sich derzeit als Arbeitshypothese:
 
-However, offset 2 is **not simply the pressure-level number**.
+```text
+Druck [bar] ≈ RAW × 0,00723 - 0,12
+```
+
+Diese Formel ist **noch nicht bestätigt**.
+
+Weitere kontrollierte Referenzpunkte sind erforderlich.
 
 ---
 
-# Additional status flags
+# Echtzeit-Durchfluss
 
-After switching the ISP15 OFF using the official app and then switching it ON again, the following state was observed.
-
-Official app:
+Offset:
 
 ```text
-Status:            Stopped
-Pressure level:    1
-Voltage:           13.6 V
-Current:           0.00 A
-Water temperature: 14.0 °C
-Water pressure:    1.91 bar
-Flow:              0.0 L/min
-Total flow:        61 L
+14
 ```
 
-Immediately afterwards FF01 started with:
+Beobachtungen:
 
 ```text
-AA 93 20 14 ...
+Wasser aus:
+RAW 0 → App 0,0 L/min
+
+Kontrollierter Betriebspunkt:
+RAW 19 → App 2,0 L/min
+
+Frühere Messung:
+RAW 16–17 → App ungefähr 1,8 L/min
 ```
 
-This differs from the previously observed Level 1 stopped state:
+Aktuelle Arbeitshypothese:
+
+```python
+flow_lpm = frame[14] / 10.0
+```
+
+Die Zuordnung von Offset 14 zum Echtzeit-Durchfluss ist sehr
+wahrscheinlich.
+
+Die Skalierung `/ 10` wird vorerst noch als Arbeitshypothese behandelt.
+
+---
+
+# Tagesmenge
+
+Offset:
 
 ```text
-AA 93 25 14 ...
+16
 ```
 
-Continuous notification testing later produced multiple consecutive frames with:
+Während kontrollierter Wasserentnahme wurde beobachtet:
 
 ```text
-AA 93 20 14 ...
+RAW 16 → App 16 L
+RAW 17 → App 17 L
 ```
 
-Therefore `0x20` was not merely observed in a single transitional packet.
+Auch bei früheren Tests erhöhte sich dieser Wert passend zur
+Tagesmenge.
 
-Both:
+Aktuelle Interpretation:
+
+```python
+daily_water_l = frame[16]
+```
+
+Status:
+
+**Sehr wahrscheinlich.**
+
+---
+
+# Gesamtmenge
+
+Offset:
+
+```text
+18
+```
+
+Beispiele:
+
+```text
+0x3D = 61 → 61 L
+0x40 = 64 → 64 L
+0x53 = 83 → 83 L
+0x54 = 84 → 84 L
+```
+
+Aktuelle Interpretation:
+
+```python
+total_water_l = frame[18]
+```
+
+Status:
+
+**Sehr wahrscheinlich für die bisher beobachteten Werte.**
+
+Noch ungeklärt ist, wie Gesamtmengen oberhalb von 255 Litern
+übertragen werden. Daher darf Offset 18 noch nicht als endgültig
+vollständig dekodiertes Gesamtmengenformat betrachtet werden.
+
+---
+
+# Status-Byte
+
+Offset:
+
+```text
+2
+```
+
+Dieses Byte enthält mehrere Status- und Modusinformationen.
+
+Beobachtete Werte sind unter anderem:
 
 ```text
 0x20
+0x21
 0x25
+0x31
+0x45
+0x65
 ```
 
-have been observed while the official app reported Level 1.
-
-This strongly suggests that offset 2 is a **bit field containing multiple status flags**, rather than a simple pressure-mode value.
-
-Possible information encoded in this byte may include:
-
-- selected pressure level
-- controller enabled state
-- pump running/stopped state
-- initialization state
-- other controller status flags
-
-The individual bits have not yet been decoded.
+Es handelt sich daher nicht um einen einfachen numerischen Statuswert,
+sondern sehr wahrscheinlich um ein Bitfeld beziehungsweise eine
+Kombination mehrerer Zustände.
 
 ---
 
-# Controlled pressure-level captures
+## Pumpenstatus
 
-## Level 1 – stopped
-
-App:
+Bei wiederholten kontrollierten Tests wurde beobachtet:
 
 ```text
-Voltage:           13.6 V
-Current:           0.00 A
-Water temperature: 14.0 °C
-Water pressure:    1.90 bar
-Flow:              0.0 L/min
-Total flow:        61 L
+0x21 = Pumpe gestoppt
+0x31 = Pumpe läuft
 ```
 
-FF01 prefix:
+Der Unterschied beträgt:
 
 ```text
-AA 93 25 14 00 00 88 00 00 00 14 01 8C 00 00 00 00 00 3D
+0x10
 ```
+
+Aktuelle Interpretation:
+
+```python
+pump_running = bool(frame[2] & 0x10)
+```
+
+Damit kennzeichnet Bit `0x10` sehr wahrscheinlich den laufenden
+Pumpenbetrieb.
+
+Status:
+
+**Stark bestätigt durch wiederholte Messungen.**
 
 ---
 
-## Level 2 – stopped
+## Konstantdruckstufe
 
-App:
-
-```text
-Voltage:           13.6 V
-Current:           0.00 A
-Water temperature: 14.0 °C
-Water pressure:    1.91 bar
-Flow:              0.0 L/min
-Total flow:        61 L
-```
-
-FF01 prefix:
+Bei gestoppter Pumpe wurden kontrolliert folgende Werte beobachtet:
 
 ```text
-AA 93 45 14 00 00 88 00 00 00 16 01 8C 00 00 00 00 00 3D
+Stufe 1 → 0x25
+Stufe 2 → 0x45
+Stufe 3 → 0x65
 ```
+
+Die Differenz zwischen den Druckstufen beträgt jeweils:
+
+```text
+0x20
+```
+
+Damit ist klar, dass Informationen zur gewählten Konstantdruckstufe
+im Status-Byte enthalten sind.
+
+Allerdings wurde bei aktivierter Stufe 1 ebenfalls `0x20` beziehungsweise
+`0x21` beobachtet.
+
+Die Druckstufe kann deshalb derzeit noch nicht zuverlässig allein durch
+eine einfache Zuordnung des vollständigen Status-Bytes bestimmt werden.
+
+Die genaue Bitbelegung muss weiter untersucht werden.
 
 ---
 
-## Level 3 – stopped
+# Prüfsumme
 
-App:
+Byte 149 ist bei allen bisher untersuchten normalen 150-Byte-Frames
+eine additive 8-Bit-Prüfsumme.
 
-```text
-Voltage:           13.6 V
-Current:           0.00 A
-Water temperature: 14.0 °C
-Water pressure:    1.90 bar
-Flow:              0.0 L/min
-Total flow:        61 L
+Berechnung:
+
+```python
+calculated_checksum = sum(frame[:149]) & 0xFF
 ```
 
-FF01 prefix:
+Vergleich:
 
-```text
-AA 93 65 14 00 00 87 00 00 00 15 01 8C 00 00 00 00 00 3D
+```python
+checksum_ok = calculated_checksum == frame[149]
 ```
 
-The complete raw captures are stored separately in the `captures/` directory.
+Diese Berechnung wurde über zahlreiche unterschiedliche Frames
+erfolgreich bestätigt.
+
+Status:
+
+**Bestätigt.**
 
 ---
 
-# OFF behaviour
+# Verhalten bei ausgeschalteter Anlage
 
-The ISP15 was switched OFF using the official Carawater app.
+Bei einem Test wurde die Anlage über die offizielle App ausgeschaltet.
 
-Immediately afterwards BLE Scanner initially displayed:
+Danach verschwanden die normalen `AA 93`-Telemetrieframes.
+
+Einmal wurde ein kurzer Wert beobachtet:
 
 ```text
 00 00 00 00 00 00 00 00 00 30
 ```
 
-However, a subsequent manual read of FF01 produced no displayed value.
+Bei anschließendem manuellen Read von FF01 wurden keine Nutzdaten
+zurückgegeben.
 
-Therefore the short value above is **not considered a confirmed OFF-state packet**.
+Der kurze Wert wird ausdrücklich **nicht** als bestätigter
+AUS-Frame interpretiert.
 
-It could represent:
+Gesichert ist derzeit lediglich:
 
-- a transitional response
-- cached data
-- a temporary controller state
-- another protocol message
-
-What can currently be stated with confidence:
-
-> After switching the ISP15 OFF, normal `AA 93 ...` FF01 telemetry was no longer available during that test.
-
-Further testing is required.
+> Bei ausgeschalteter Anlage war während dieses Tests die normale
+> 150-Byte-FF01-Telemetrie nicht mehr verfügbar.
 
 ---
 
-# Direct read vs notifications
+# Empfohlener Ablauf für einen Client
 
-A Python test client using Bleak was used to perform a direct GATT read of FF01.
-
-Connection succeeded:
+Für einen rein lesenden Client ist derzeit folgender Ablauf ausreichend:
 
 ```text
-Connected: True
+1. Nach BLE-Gerätename ISP_42_539c suchen
+2. Verbindung herstellen
+3. FF01 Notifications abonnieren
+4. Auf 150-Byte-Frames warten
+5. Header AA 93 prüfen
+6. Prüfsumme kontrollieren
+7. bekannte Felder dekodieren
 ```
 
-but the direct read returned:
-
-```text
-FF01 Length: 0 Bytes
-FF01 RAW:
-```
-
-Notifications were then enabled on the same characteristic.
-
-The ISP15 immediately started transmitting full telemetry frames:
-
-```text
-FF01 [150 Bytes]: AA932014...
-```
-
-Multiple consecutive frames were received successfully.
-
-This establishes the current recommended read strategy:
-
-```text
-Connect
-   ↓
-Subscribe to FF01 notifications
-   ↓
-Receive 150-byte telemetry frames
-   ↓
-Verify checksum
-   ↓
-Decode status values
-```
-
-No FF02 write is required for this process.
+Ein Schreibzugriff auf FF02 ist für die Telemetrie nicht erforderlich.
 
 ---
 
-# Example continuous notification data
-
-The following frames were captured consecutively using Python/Bleak:
-
-```text
-AA93201400008900000010018C00000000003D...
-AA9320140000890000000F018C00000000003D...
-AA9320140000890000000F018C00000000003D...
-```
-
-The frames remained largely stable while the pump was stopped.
-
-Only a small number of fields changed.
-
-For example:
-
-```text
-Offset 10:
-0x10 → 0x0F
-
-Checksum:
-0x2E → 0x2D
-```
-
-This relationship contributed to identifying the checksum algorithm.
-
----
-
-# Checksum
-
-The final byte of a normal 150-byte FF01 frame is an **additive 8-bit checksum**.
-
-The checksum is calculated by adding bytes `0` through `148` and keeping only the lowest 8 bits of the result.
-
-In Python:
+# Beispiel – Prüfen und Dekodieren
 
 ```python
-checksum = sum(frame[:149]) & 0xFF
+def decode_frame(frame):
+    if len(frame) != 150:
+        return None
+
+    if frame[0] != 0xAA or frame[1] != 0x93:
+        return None
+
+    checksum = sum(frame[:149]) & 0xFF
+
+    if checksum != frame[149]:
+        return None
+
+    status = frame[2]
+
+    return {
+        "pump_running": bool(status & 0x10),
+        "voltage_v": frame[6] / 10.0,
+        "current_raw": frame[8],
+        "pressure_raw": int.from_bytes(
+            frame[10:12],
+            byteorder="little",
+            signed=False
+        ),
+        "water_temperature_c": frame[12] / 10.0,
+        "flow_raw": frame[14],
+        "daily_water_l": frame[16],
+        "total_water_l": frame[18],
+    }
 ```
 
-The calculated value must equal:
-
-```python
-frame[149]
-```
-
-Example:
-
-```text
-Received checksum:   0x2E
-Calculated checksum: 0x2E
-```
-
-This relationship was verified against multiple consecutive live FF01 frames.
-
-A particularly useful observation was:
-
-```text
-Offset 10: 0x10 → 0x0F   (-1)
-Checksum:  0x2E → 0x2D   (-1)
-```
-
-Another capture changed two fields simultaneously:
-
-```text
-Offset 6:  0x89 → 0x88   (-1)
-Offset 10: 0x10 → 0x11   (+1)
-```
-
-The changes cancel each other out and the checksum remained unchanged:
-
-```text
-0x2E → 0x2E
-```
-
-Further live verification using the Python reader produced valid checksums for every tested frame.
-
-Current validation code:
-
-```python
-received_checksum = frame[149]
-calculated_checksum = sum(frame[:149]) & 0xFF
-checksum_ok = received_checksum == calculated_checksum
-```
-
-**Status: confirmed for the observed 150-byte FF01 frame type.**
+Strom, Druck und Durchfluss werden im Beispiel bewusst teilweise noch
+als Rohwerte ausgegeben, solange ihre Skalierung nicht endgültig
+bestätigt ist.
 
 ---
 
-# Dynamic fields while running
+# Aktueller Stand
 
-Earlier captures made while water was flowing showed several fields changing rapidly.
+## Bestätigt
 
-Examples:
+- Custom Service FF00
+- FF01 liefert Telemetrie per Notify
+- FF01-Telemetrieframe hat 150 Byte
+- Header `AA 93`
+- Versorgungsspannung
+- Wassertemperatur
+- additive 8-Bit-Prüfsumme
+- Telemetrie funktioniert ohne FF02-Schreibzugriff
 
-```text
-AA933514000085001700D400960012...
-AA933514000086001400A900960014...
-AA933514000084001A00AA00960031...
-AA933514000084001800C900960012...
-AA933514000085001800030196000F...
-AA933514000084001900370196000D...
-AA933514000084001A00590196000B...
-```
+## Sehr wahrscheinlich
 
-These captures indicate that multiple fields near the beginning of FF01 represent live operating data.
+- Offset 8 = Stromaufnahme
+- Offset 10–11 = Wasserdruck
+- Offset 14 = Echtzeit-Durchfluss
+- Offset 16 = Tagesmenge
+- Offset 18 = Gesamtmenge bei den bisher beobachteten Werten
+- Status-Bit `0x10` = Pumpe läuft
 
-Likely candidates still to decode include:
+## Noch offen
 
-- motor current
-- water pressure
-- real-time flow
-
-Controlled tests with the pump running will be required to identify these fields reliably.
-
----
-
-# Connection behaviour
-
-During testing:
-
-- The official Carawater app can connect successfully.
-- BLE Scanner on iOS can connect successfully.
-- A Python/Bleak client on macOS can connect successfully.
-- FF01 notifications work reliably with Python/Bleak.
-- The official app and another BLE client cannot be used with the ISP15 simultaneously.
-- Linux/BlueZ was able to initiate a connection during earlier testing but did not maintain it reliably.
-
-The ISP15 therefore appears to support only one active BLE client connection in the tested setup.
-
-This makes direct observation of the official app's FF02 writes more difficult.
+- endgültige Skalierung der Stromaufnahme
+- endgültige Skalierung des Wasserdrucks
+- endgültige Skalierung des Echtzeit-Durchflusses
+- Format der Gesamtmenge oberhalb von 255 L
+- vollständige Bitbelegung des Status-Bytes
+- genaue Kodierung der Konstantdruckstufen
+- Fehlerstatus / Fehlercodes
+- Bedeutung der übrigen FF01-Felder
+- Aufbau der FF02-Kommandos
+- EIN/AUS-Befehl
+- Auswahl Stufe 1/2/3
+- Reset-Befehl
 
 ---
 
-# Python / Bleak test environment
+# Sicherheitsregel für weitere Tests
 
-The first successful independent BLE client was tested with:
+Bis das FF02-Befehlsformat verstanden ist:
 
-```text
-Platform: macOS
-Python:   3.13
-Bleak:    3.0.2
-```
+**Keine geratenen oder experimentell konstruierten Schreibbefehle
+an FF02 senden.**
 
-The client:
-
-1. discovers the ISP15 by BLE name
-2. connects using CoreBluetooth
-3. subscribes to FF01 notifications
-4. receives 150-byte status frames
-5. validates the additive checksum
-6. decodes currently identified telemetry fields
-7. compares consecutive frames for changed offsets
-
-No write operation is required.
-
-This provides the basis for a future read-only ISP15 client.
-
----
-
-# Current findings
-
-## Confirmed
-
-- ISP15 uses Bluetooth Low Energy.
-- Custom service is `FF00`.
-- FF01 supports Read and Notify.
-- FF02 supports Write, Write Without Response and Notify.
-- FF01 carries status/telemetry data.
-- Normal observed FF01 frames begin with `AA 93`.
-- Normal notification frames are 150 bytes long.
-- FF01 notifications can be received using Python/Bleak.
-- FF02 writes are not required to receive telemetry.
-- FF01 changes with the operating state.
-- Offset 2 changes with pressure level and other device states.
-- Pressure levels 1–3 produce reproducibly different offset-2 values under controlled stopped conditions.
-- Direct FF01 reads may return an empty value even while notifications provide telemetry.
-- Normal FF01 telemetry disappeared when the ISP15 was switched OFF in the tested scenario.
-- Byte 149 is an additive 8-bit checksum for the observed 150-byte FF01 frames.
-- The checksum is calculated as `sum(frame[0:149]) & 0xFF`.
-
-## Strong evidence
-
-- Offset 6 represents supply voltage with scaling `/10`.
-- Offset 12 represents water temperature with scaling `/10`.
-- Offset 18 represents total water volume.
-- Offset 2 is a status/mode bit field.
-- Pressure-level information is encoded in offset 2.
-
-## Suspected
-
-- FF02 carries commands from the official app.
-
-## Unknown
-
-- Exact bit layout of offset 2.
-- Meaning of `0x20` versus `0x25`.
-- Motor current field.
-- Water pressure field.
-- Real-time flow field.
-- Daily water volume field.
-- Multi-byte format of total water volume.
-- ON command.
-- OFF command.
-- Level 1 command.
-- Level 2 command.
-- Level 3 command.
-- Reset command.
-- Error-code representation.
-
----
-
-# Next steps
-
-1. Continue development of the reusable read-only BLE client.
-2. Discover the ISP15 by device name rather than a fixed platform-specific identifier.
-3. Subscribe automatically to FF01 notifications.
-4. Validate every received FF01 frame using the checksum.
-5. Decode the strongly suspected fields:
-   - voltage
-   - temperature
-   - total water volume
-6. Log raw 150-byte frames for further analysis.
-7. Perform controlled running tests to identify:
-   - current
-   - pressure
-   - real-time flow
-8. Investigate the individual bits of offset 2.
-9. Investigate daily water volume and the total-volume counter format.
-10. Capture FF02 writes from the official app.
-11. Determine the command protocol.
-12. Only after commands are understood, test controlled writes.
-13. Build a Home Assistant integration.
-
----
-
-# Safety during reverse engineering
-
-Until the FF02 protocol is understood:
-
-> Do not send guessed or random data to FF02.
-
-Reading and subscribing to FF01 is sufficient for the current analysis and avoids sending unknown commands to the pump controller.
-
----
-
-# Goal
-
-The long-term goal is local monitoring and control of the Carawater ISP15 without requiring the official mobile application.
-
-Potential integrations include:
-
-- Python BLE client
-- Raspberry Pi / Linux
-- Home Assistant
-- ESPHome
-
----
-
-# Raw captures
-
-Raw and controlled test data are stored in:
-
-```text
-captures/
-```
-
-Interpretations belong in this document, while raw observations are kept separately so hypotheses can be checked against the original measurements.
-
----
-
-# Disclaimer
-
-This is an independent reverse-engineering project and is not affiliated with or endorsed by Carawater.
-
-The documentation is based on observations of personally owned hardware and is intended for research and interoperability.
-
-Information may change as the protocol becomes better understood.
-
-Use at your own risk.
+Die weitere Analyse bleibt zunächst auf lesende BLE-Kommunikation
+und kontrollierte Messungen beschränkt.
