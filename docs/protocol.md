@@ -161,8 +161,8 @@ Der aktuelle Stand der Dekodierung:
 | 10–11 | 2 | Wasserdruck | Little Endian, Skalierung noch vorläufig | sehr wahrscheinlich |
 | 12 | 1 | Wassertemperatur | RAW / 10 °C | bestätigt |
 | 14 | 1 | Echtzeit-Durchfluss | vermutlich RAW / 10 L/min | sehr wahrscheinlich |
-| 16 | 1 | Tagesmenge | Liter | sehr wahrscheinlich |
-| 18 | 1 | Gesamtmenge | Liter bei bisher beobachteten Werten | sehr wahrscheinlich |
+| 16 | 1 | Tagesmenge | Liter | bestätigt |
+| 18 | 1 | Gesamtmenge | Liter bei bisher beobachteten Werten | bestätigt |
 | 149 | 1 | Prüfsumme | additive 8-Bit-Prüfsumme | bestätigt |
 
 Die Bedeutung der übrigen Bytes ist noch nicht vollständig geklärt.
@@ -338,15 +338,30 @@ Offset:
 16
 ```
 
-Während kontrollierter Wasserentnahme wurde beobachtet:
+Während kontrollierter Wasserentnahmen wurde bereits beobachtet:
 
 ```text
 RAW 16 → App 16 L
 RAW 17 → App 17 L
 ```
 
-Auch bei früheren Tests erhöhte sich dieser Wert passend zur
-Tagesmenge.
+Am 22.10.2026 wurde zusätzlich ein gezielter Reset der
+Verbrauchszähler über die offizielle Carawater-App durchgeführt.
+
+Unmittelbar vor dem Reset:
+
+```text
+Offset 16 = 17 → 17 L Tagesmenge
+```
+
+Unmittelbar nach dem Reset:
+
+```text
+Offset 16 = 0 → 0 L Tagesmenge
+```
+
+Die offizielle App setzte gleichzeitig ebenfalls die Tagesmenge auf
+0 Liter zurück.
 
 Aktuelle Interpretation:
 
@@ -356,7 +371,7 @@ daily_water_l = frame[16]
 
 Status:
 
-**Sehr wahrscheinlich.**
+**Bestätigt für die bisher beobachteten Werte.**
 
 ---
 
@@ -368,7 +383,7 @@ Offset:
 18
 ```
 
-Beispiele:
+Bisher beobachtete Beispiele:
 
 ```text
 0x3D = 61 → 61 L
@@ -376,6 +391,24 @@ Beispiele:
 0x53 = 83 → 83 L
 0x54 = 84 → 84 L
 ```
+
+Am 22.10.2026 wurde ein gezielter Reset der Verbrauchszähler über
+die offizielle Carawater-App durchgeführt.
+
+Unmittelbar vor dem Reset:
+
+```text
+Offset 18 = 84 → 84 L Gesamtmenge
+```
+
+Unmittelbar nach dem Reset:
+
+```text
+Offset 18 = 0 → 0 L Gesamtmenge
+```
+
+Die offizielle App zeigte nach dem Reset ebenfalls 0 Liter
+Gesamtmenge an.
 
 Aktuelle Interpretation:
 
@@ -385,11 +418,32 @@ total_water_l = frame[18]
 
 Status:
 
-**Sehr wahrscheinlich für die bisher beobachteten Werte.**
+**Bestätigt für die bisher beobachteten Werte bis 84 Liter.**
 
 Noch ungeklärt ist, wie Gesamtmengen oberhalb von 255 Litern
-übertragen werden. Daher darf Offset 18 noch nicht als endgültig
-vollständig dekodiertes Gesamtmengenformat betrachtet werden.
+übertragen werden. Daher ist zwar die Zuordnung von Offset 18 zum
+Gesamtmengenzähler bestätigt, das vollständige Datenformat des
+Zählers aber noch nicht bekannt.
+
+---
+
+# Weitere Verbrauchs- und Statistikfelder
+
+Beim gezielten Reset der Verbrauchszähler wurden neben Offset 16 und
+Offset 18 auch mehrere bislang unbekannte Felder im hinteren Bereich
+des 150-Byte-FF01-Frames auf `0x00` zurückgesetzt.
+
+Dies ist ein deutlicher Hinweis darauf, dass dort weitere
+Verbrauchs-, Statistik- oder Zählerdaten gespeichert werden.
+
+Die genaue Bedeutung dieser Felder ist derzeit noch unbekannt.
+
+Der vollständige RAW-Capture unmittelbar nach dem Reset befindet sich
+unter:
+
+```text
+captures/raw/2026-10-22-after-counter-reset.csv
+```
 
 ---
 
@@ -599,14 +653,15 @@ bestätigt ist.
 - Wassertemperatur
 - additive 8-Bit-Prüfsumme
 - Telemetrie funktioniert ohne FF02-Schreibzugriff
+- Offset 16 = Tagesmenge für die bisher beobachteten Werte
+- Offset 18 = Gesamtmenge für die bisher beobachteten Werte
+- Reset über die Hersteller-App setzt beide Verbrauchszähler zurück
 
 ## Sehr wahrscheinlich
 
 - Offset 8 = Stromaufnahme
 - Offset 10–11 = Wasserdruck
 - Offset 14 = Echtzeit-Durchfluss
-- Offset 16 = Tagesmenge
-- Offset 18 = Gesamtmenge bei den bisher beobachteten Werten
 - Status-Bit `0x10` = Pumpe läuft
 
 ## Noch offen
